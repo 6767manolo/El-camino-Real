@@ -100,6 +100,22 @@ function quoteOfDay() {
   return QUOTES[idx];
 }
 
+const IDENTITY_QUOTES = [
+  'Cada hábito es un voto por la persona que quieres ser.',
+  'Hoy has avanzado por EL CAMINO REAL.',
+  'La constancia supera a la perfección.',
+  'No busques hacerlo perfecto. Busca volver al camino.',
+];
+function identityToast() {
+  toast(IDENTITY_QUOTES[Math.floor(Math.random() * IDENTITY_QUOTES.length)]);
+}
+
+/* Puntos por defecto según el nivel del hábito — edítalos aquí cuando quieras. */
+const DEFAULT_POINTS = { nucleo: 100, mini: 20 };
+function habitPoints(h) {
+  return h.points != null && h.points !== '' ? Number(h.points) : DEFAULT_POINTS[h.level || 'mini'];
+}
+
 /* ---------------- Sheet (formulario modal) ---------------- */
 
 function openSheet(title, bodyHtml, onMount) {
@@ -325,6 +341,12 @@ function renderHabitos(el) {
 function activeHabits() {
   return DB.habits.filter((h) => !h.archived);
 }
+function coreHabits(list) {
+  return (list || activeHabits()).filter((h) => (h.level || 'mini') === 'nucleo');
+}
+function miniHabits(list) {
+  return (list || activeHabits()).filter((h) => (h.level || 'mini') !== 'nucleo');
+}
 
 function habitStreak(h) {
   let streak = 0;
@@ -352,6 +374,31 @@ function renderHabitosHoy(el) {
   }
   const moodOptions = ['😴', '😐', '🙂', '🔥', '😤'];
   const currentMood = DB.moods[today];
+
+  function habitCard(h, isCore) {
+    const val = log[h.id];
+    const done = h.type === 'bool' ? val === true : (val || 0) >= (h.target || 1);
+    const streak = habitStreak(h);
+    return `
+    <div class="card ${isCore ? 'core-card' : 'mini-card'}" data-habit="${h.id}">
+      <div class="row between">
+        <div class="row" style="gap:12px;">
+          <button class="checkbox ${done ? 'checked' : ''}" data-toggle="${h.id}">${done ? '✓' : ''}</button>
+          <div>
+            <div class="card-title">${esc(h.name)}</div>
+            <div class="card-sub">${h.category ? esc(h.category) + ' · ' : ''}${
+      h.type === 'qty' ? `${val || 0}/${h.target} ${esc(h.unit || '')}` : streak > 0 ? `🔥 ${streak} días seguidos` : 'empieza hoy tu racha'
+    }</div>
+          </div>
+        </div>
+        ${h.type === 'qty' ? `<button class="btn" data-qty="${h.id}">+${h.step || 1}</button>` : ''}
+      </div>
+    </div>`;
+  }
+
+  const core = coreHabits(list);
+  const mini = miniHabits(list);
+
   el.innerHTML = `
     <div class="card" style="text-align:center;border-color:var(--accent);">
       <div class="card-sub" style="font-style:italic;">"${esc(quote)}"</div>
@@ -367,27 +414,14 @@ function renderHabitosHoy(el) {
           .join('')}
       </div>
     </div>
-    <div class="section-label">Hoy</div>
-    ${list
-      .map((h) => {
-        const val = log[h.id];
-        const done = h.type === 'bool' ? val === true : (val || 0) >= (h.target || 1);
-        const streak = habitStreak(h);
-        return `
-        <div class="card row between" data-habit="${h.id}">
-          <div class="row" style="gap:12px;">
-            <button class="checkbox ${done ? 'checked' : ''}" data-toggle="${h.id}">${done ? '✓' : ''}</button>
-            <div>
-              <div class="card-title">${esc(h.name)}</div>
-              <div class="card-sub">${h.category ? esc(h.category) + ' · ' : ''}${
-          h.type === 'qty' ? `${val || 0}/${h.target} ${esc(h.unit || '')}` : streak > 0 ? `🔥 ${streak} días` : 'sin racha'
-        }</div>
-            </div>
-          </div>
-          ${h.type === 'qty' ? `<button class="btn" data-qty="${h.id}">+${h.step || 1}</button>` : ''}
-        </div>`;
-      })
-      .join('')}
+
+    <div class="section-label">⭐ Hábitos núcleo</div>
+    <div class="card-sub mb" style="margin-top:-6px;">Los que definen quién quieres ser.</div>
+    ${core.map((h) => habitCard(h, true)).join('') || `<div class="card-sub mb">Aún no has marcado ningún hábito como núcleo.</div>`}
+
+    <div class="section-label">🔹 Mini hábitos</div>
+    <div class="card-sub mb" style="margin-top:-6px;">Pequeños apoyos que sostienen lo importante.</div>
+    ${mini.map((h) => habitCard(h, false)).join('') || `<div class="card-sub mb">Sin mini hábitos activos.</div>`}
   `;
   el.querySelectorAll('[data-mood]').forEach((b) =>
     b.addEventListener('click', () => {
@@ -396,6 +430,13 @@ function renderHabitosHoy(el) {
       renderHabitosHoy(el);
     })
   );
+  function afterComplete() {
+    checkRewards();
+    const nowLog = DB.habitLogs[today] || {};
+    const allCoreDone = core.length > 0 && core.every((h) => (h.type === 'bool' ? nowLog[h.id] === true : (nowLog[h.id] || 0) >= (h.target || 1)));
+    if (allCoreDone) toast('Hoy has avanzado por EL CAMINO REAL.');
+    else identityToast();
+  }
   el.querySelectorAll('[data-toggle]').forEach((b) =>
     b.addEventListener('click', () => {
       const id = b.dataset.toggle;
@@ -405,11 +446,11 @@ function renderHabitosHoy(el) {
       const willComplete = !(cur === true);
       DB.habitLogs[today][id] = willComplete ? true : false;
       if (willComplete) {
-        DB.profile.points = (DB.profile.points || 0) + 10;
-        checkRewards();
+        DB.profile.points = (DB.profile.points || 0) + habitPoints(h);
+        persist('profile');
+        afterComplete();
       }
       persist('habitLogs');
-      persist('profile');
       renderHabitosHoy(el);
     })
   );
@@ -423,41 +464,50 @@ function renderHabitosHoy(el) {
       DB.habitLogs[today][id] = cur + (h.step || 1);
       const nowComplete = DB.habitLogs[today][id] >= (h.target || 1);
       if (nowComplete && !wasComplete) {
-        DB.profile.points = (DB.profile.points || 0) + 10;
-        checkRewards();
+        DB.profile.points = (DB.profile.points || 0) + habitPoints(h);
+        persist('profile');
+        afterComplete();
       }
       persist('habitLogs');
-      persist('profile');
       renderHabitosHoy(el);
     })
   );
 }
 
 function renderHabitosLista(el) {
-  el.innerHTML = `
-    <button class="btn btn-accent mb" id="addHabit" style="width:100%;padding:12px;">+ Nuevo hábito</button>
-    <div class="row between mb">
-      <span class="card-sub">Puntos totales</span>
-      <span class="pill accent">${DB.profile.points || 0} pts</span>
-    </div>
-    ${activeHabits()
-      .map(
-        (h) => `
+  function card(h) {
+    return `
       <div class="card">
         <div class="row between">
           <div>
-            <div class="card-title">${esc(h.name)}</div>
-            <div class="card-sub">${esc(h.category || 'General')} · ${h.type === 'qty' ? `objetivo ${h.target} ${esc(h.unit || '')}` : h.flex ? 'flexible' : 'todo o nada'}</div>
-          </div>
-          <div class="row">
-            <button class="btn-ghost" data-archive="${h.id}">Archivar</button>
+            <div class="card-title">${h.level === 'nucleo' ? '⭐' : '🔹'} ${esc(h.name)}</div>
+            <div class="card-sub">${esc(h.category || 'General')} · ${h.type === 'qty' ? `objetivo ${h.target} ${esc(h.unit || '')}` : h.flex ? 'flexible' : 'todo o nada'} · ${habitPoints(h)} pts</div>
           </div>
         </div>
-      </div>`
-      )
-      .join('') || emptyState('Sin hábitos activos', '')}
+        <div class="row mt" style="gap:6px;">
+          <button class="btn" data-edit="${h.id}">Editar</button>
+          <button class="btn-ghost" data-archive="${h.id}">Archivar</button>
+          <button class="btn-ghost" data-delete="${h.id}" style="color:var(--warn);">Borrar</button>
+        </div>
+      </div>`;
+  }
+  const core = coreHabits();
+  const mini = miniHabits();
+  el.innerHTML = `
+    <button class="btn btn-accent mb" id="addHabit" style="width:100%;padding:12px;">+ Nuevo hábito</button>
+    <div class="row between mb">
+      <span class="card-sub">Puntos totales acumulados</span>
+      <span class="pill accent">${DB.profile.points || 0} pts</span>
+    </div>
+    <div class="section-label">⭐ Hábitos núcleo</div>
+    ${core.map(card).join('') || `<div class="card-sub mb">Los que definen tu identidad. Añade el primero.</div>`}
+    <div class="section-label">🔹 Mini hábitos</div>
+    ${mini.map(card).join('') || `<div class="card-sub mb">Pequeños apoyos diarios.</div>`}
   `;
   document.getElementById('addHabit').addEventListener('click', () => habitForm());
+  el.querySelectorAll('[data-edit]').forEach((b) =>
+    b.addEventListener('click', () => habitForm(DB.habits.find((x) => x.id === b.dataset.edit)))
+  );
   el.querySelectorAll('[data-archive]').forEach((b) =>
     b.addEventListener('click', () => {
       const h = DB.habits.find((x) => x.id === b.dataset.archive);
@@ -466,47 +516,79 @@ function renderHabitosLista(el) {
       renderHabitosLista(el);
     })
   );
+  el.querySelectorAll('[data-delete]').forEach((b) =>
+    b.addEventListener('click', () => {
+      const h = DB.habits.find((x) => x.id === b.dataset.delete);
+      if (!confirm(`¿Borrar "${h.name}" definitivamente? No se puede deshacer.`)) return;
+      DB.habits = DB.habits.filter((x) => x.id !== h.id);
+      Object.keys(DB.habitLogs).forEach((date) => delete DB.habitLogs[date][h.id]);
+      persist('habits');
+      persist('habitLogs');
+      toast('Hábito borrado');
+      renderHabitosLista(el);
+    })
+  );
 }
 
-function habitForm() {
+function habitForm(existing) {
+  const isEdit = !!existing;
   openSheet(
-    'Nuevo hábito',
+    isEdit ? 'Editar hábito' : 'Nuevo hábito — un voto por quien quieres ser',
     `
-    <div class="field"><label class="field-label">Nombre</label><input id="hName" placeholder="Leer, beber agua, gym..." /></div>
-    <div class="field"><label class="field-label">Categoría</label><input id="hCat" placeholder="Fitness, mente, contenido..." /></div>
-    <div class="field"><label class="field-label">Tipo</label>
-      <select id="hType"><option value="bool">Sí / No</option><option value="qty">Cuantificable (número)</option></select>
+    <div class="field"><label class="field-label">Nombre</label><input id="hName" placeholder="Leer, beber agua, gym..." value="${esc(existing?.name || '')}" /></div>
+    <div class="field"><label class="field-label">Categoría</label><input id="hCat" placeholder="Fitness, mente, contenido..." value="${esc(existing?.category || '')}" /></div>
+    <div class="field"><label class="field-label">Nivel del hábito</label>
+      <select id="hLevel">
+        <option value="nucleo" ${existing?.level === 'nucleo' ? 'selected' : ''}>⭐ Núcleo — define quién soy</option>
+        <option value="mini" ${(!existing || existing.level !== 'nucleo') ? 'selected' : ''}>🔹 Mini — apoyo diario</option>
+      </select>
     </div>
-    <div class="field" id="qtyFields" style="display:none;">
+    <div class="field"><label class="field-label">Tipo</label>
+      <select id="hType">
+        <option value="bool" ${existing?.type !== 'qty' ? 'selected' : ''}>Sí / No</option>
+        <option value="qty" ${existing?.type === 'qty' ? 'selected' : ''}>Cuantificable (número)</option>
+      </select>
+    </div>
+    <div class="field" id="qtyFields" style="display:${existing?.type === 'qty' ? 'block' : 'none'};">
       <label class="field-label">Objetivo diario y unidad</label>
-      <div class="row"><input id="hTarget" type="number" placeholder="5" style="width:50%;" /><input id="hUnit" placeholder="páginas, L, min..." /></div>
+      <div class="row"><input id="hTarget" type="number" placeholder="5" style="width:50%;" value="${existing?.target || ''}" /><input id="hUnit" placeholder="páginas, L, min..." value="${esc(existing?.unit || '')}" /></div>
     </div>
     <div class="row" style="margin-bottom:12px;">
-      <label class="row" style="gap:8px;font-size:14px;"><input type="checkbox" id="hFlex" style="width:auto;" /> Flexible (puedo saltarme 1 vez/semana)</label>
+      <label class="row" style="gap:8px;font-size:14px;"><input type="checkbox" id="hFlex" style="width:auto;" ${existing?.flex ? 'checked' : ''} /> Flexible (puedo saltarme 1 vez/semana)</label>
     </div>
-    <button class="btn btn-accent" id="hSave" style="width:100%;padding:12px;">Guardar</button>
+    <div class="field"><label class="field-label">Puntos por completarlo</label><input id="hPoints" type="number" placeholder="${DEFAULT_POINTS[existing?.level === 'nucleo' ? 'nucleo' : 'mini']}" value="${existing?.points ?? ''}" /></div>
+    <button class="btn btn-accent" id="hSave" style="width:100%;padding:12px;">${isEdit ? 'Guardar cambios' : 'Crear hábito'}</button>
   `,
     (body) => {
       body.querySelector('#hType').addEventListener('change', (e) => {
         body.querySelector('#qtyFields').style.display = e.target.value === 'qty' ? 'block' : 'none';
       });
+      body.querySelector('#hLevel').addEventListener('change', (e) => {
+        const pointsInput = body.querySelector('#hPoints');
+        pointsInput.placeholder = DEFAULT_POINTS[e.target.value];
+      });
       body.querySelector('#hSave').addEventListener('click', () => {
         const name = body.querySelector('#hName').value.trim();
         if (!name) return toast('Ponle un nombre');
-        DB.habits.push({
-          id: uid(),
+        const data = {
           name,
           category: body.querySelector('#hCat').value.trim(),
+          level: body.querySelector('#hLevel').value,
           type: body.querySelector('#hType').value,
           target: Number(body.querySelector('#hTarget').value) || 1,
           unit: body.querySelector('#hUnit').value.trim(),
           step: 1,
           flex: body.querySelector('#hFlex').checked,
-          archived: false,
-        });
+          points: body.querySelector('#hPoints').value === '' ? null : Number(body.querySelector('#hPoints').value),
+        };
+        if (isEdit) {
+          Object.assign(existing, data);
+        } else {
+          DB.habits.push({ id: uid(), archived: false, ...data });
+        }
         persist('habits');
         closeSheet();
-        toast('Hábito añadido');
+        toast(isEdit ? 'Hábito actualizado' : 'Hábito añadido');
         habitosTab = 'lista';
         renderHabitos(document.getElementById('sectionBody'));
       });
@@ -609,10 +691,25 @@ function renderHabitosArchivo(el) {
         (h) => `
     <div class="card row between">
       <div class="card-title">${esc(h.name)}</div>
-      <button class="btn" data-restore="${h.id}">Restaurar</button>
+      <div class="row">
+        <button class="btn" data-restore="${h.id}">Restaurar</button>
+        <button class="btn-ghost" data-delete2="${h.id}" style="color:var(--warn);">Borrar</button>
+      </div>
     </div>`
       )
       .join('') || emptyState('Archivo vacío', 'Los hábitos que archives aparecerán aquí.');
+  el.querySelectorAll('[data-delete2]').forEach((b) =>
+    b.addEventListener('click', () => {
+      const h = DB.habits.find((x) => x.id === b.dataset.delete2);
+      if (!confirm(`¿Borrar "${h.name}" definitivamente? No se puede deshacer.`)) return;
+      DB.habits = DB.habits.filter((x) => x.id !== h.id);
+      Object.keys(DB.habitLogs).forEach((date) => delete DB.habitLogs[date][h.id]);
+      persist('habits');
+      persist('habitLogs');
+      toast('Hábito borrado');
+      renderHabitosArchivo(el);
+    })
+  );
   el.querySelectorAll('[data-restore]').forEach((b) =>
     b.addEventListener('click', () => {
       DB.habits.find((h) => h.id === b.dataset.restore).archived = false;

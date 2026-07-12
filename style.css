@@ -359,6 +359,18 @@ input:focus, textarea:focus, select:focus, button:focus-visible {
   margin-bottom: 8px;
 }
 
+.card.core-card {
+  border-color: var(--accent);
+  background: linear-gradient(180deg, rgba(255,90,31,0.07), var(--surface));
+}
+.card.core-card .card-title { font-size: 17px; font-weight: 700; }
+.card.mini-card {
+  opacity: 0.92;
+  padding: 11px 16px;
+}
+.card.mini-card .card-title { font-size: 14px; font-weight: 500; }
+.card.mini-card .checkbox { width: 20px; height: 20px; border-radius: 6px; }
+
 .section-label {
   font-size: 11px;
   text-transform: uppercase;
