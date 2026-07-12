@@ -72,6 +72,8 @@ const DB = {
   contacts: load('contacts', []), // {id,name,note,phone}
   rewards: load('rewards', { unlocked: [] }),
   pomodoro: load('pomodoro', { minutes: 25 }),
+  moods: load('moods', {}), // {date: 'emoji'}
+  mealIdeas: load('mealIdeas', []), // {id, text, type} type: desayuno/comida/cena/snack
 };
 
 function persist(key) {
@@ -139,6 +141,7 @@ function render() {
   }
   $app.innerHTML = `
     <div class="top-greeting">
+      <button id="searchBtn" style="pointer-events:auto;font-size:15px;background:var(--surface);width:32px;height:32px;border-radius:50%;border:1px solid var(--line);">🔍</button>
       <div class="name">${esc(DB.profile.name || 'Tú')}</div>
       <div class="quote">${esc(quoteOfDay())}</div>
     </div>
@@ -172,6 +175,45 @@ function render() {
   $app.querySelectorAll('[data-open]').forEach((btn) => {
     btn.addEventListener('click', () => openSection(btn.dataset.open));
   });
+  document.getElementById('searchBtn').addEventListener('click', globalSearch);
+}
+
+function globalSearch() {
+  openSheet(
+    'Buscar en todo',
+    `<input id="gSearch" placeholder="Escribe para buscar..." />
+     <div id="gResults" class="mt"></div>`,
+    (body) => {
+      const input = body.querySelector('#gSearch');
+      const results = body.querySelector('#gResults');
+      input.focus();
+      const run = () => {
+        const q = input.value.trim().toLowerCase();
+        if (!q) {
+          results.innerHTML = '';
+          return;
+        }
+        const hits = [];
+        DB.habits.forEach((h) => h.name.toLowerCase().includes(q) && hits.push({ cat: 'Hábito', text: h.name }));
+        DB.ugohIdeas.forEach((i) => i.text.toLowerCase().includes(q) && hits.push({ cat: 'Idea UGOH', text: i.text }));
+        DB.ugohHooks.forEach((h) => h.text.toLowerCase().includes(q) && hits.push({ cat: 'Hook', text: h.text }));
+        DB.ugohVideos.forEach((v) => v.title.toLowerCase().includes(q) && hits.push({ cat: 'Vídeo', text: v.title }));
+        DB.workouts.forEach((w) => {
+          if ((w.name || '').toLowerCase().includes(q)) hits.push({ cat: 'Entreno', text: `${w.name} · ${fmtDate(w.date)}` });
+          (w.exercises || []).forEach((e) => e.name.toLowerCase().includes(q) && hits.push({ cat: 'Ejercicio', text: `${e.name} · ${fmtDate(w.date)}` }));
+        });
+        DB.countdowns.forEach((c) => c.label.toLowerCase().includes(q) && hits.push({ cat: 'Fecha clave', text: c.label }));
+        DB.contacts.forEach((c) => c.name.toLowerCase().includes(q) && hits.push({ cat: 'Contacto', text: c.name }));
+        DB.mealIdeas.forEach((m) => m.text.toLowerCase().includes(q) && hits.push({ cat: 'Comida', text: m.text }));
+        results.innerHTML =
+          hits
+            .slice(0, 30)
+            .map((h) => `<div class="card"><span class="pill">${esc(h.cat)}</span><div class="mt">${esc(h.text)}</div></div>`)
+            .join('') || `<div class="card-sub" style="text-align:center;">Sin resultados</div>`;
+      };
+      input.addEventListener('input', run);
+    }
+  );
 }
 
 function updatePath() {
@@ -308,9 +350,22 @@ function renderHabitosHoy(el) {
     el.innerHTML = emptyState('Aún no tienes hábitos', 'Añade el primero desde la pestaña "Hábitos".');
     return;
   }
+  const moodOptions = ['😴', '😐', '🙂', '🔥', '😤'];
+  const currentMood = DB.moods[today];
   el.innerHTML = `
     <div class="card" style="text-align:center;border-color:var(--accent);">
       <div class="card-sub" style="font-style:italic;">"${esc(quote)}"</div>
+    </div>
+    <div class="card">
+      <div class="card-sub mb" style="text-align:center;">¿Cómo llegas hoy?</div>
+      <div class="row" style="justify-content:center;gap:10px;">
+        ${moodOptions
+          .map(
+            (m) =>
+              `<button data-mood="${m}" style="font-size:26px;padding:6px 10px;border-radius:12px;background:${m === currentMood ? 'var(--surface-2)' : 'transparent'};border:1px solid ${m === currentMood ? 'var(--accent)' : 'transparent'};">${m}</button>`
+          )
+          .join('')}
+      </div>
     </div>
     <div class="section-label">Hoy</div>
     ${list
@@ -334,6 +389,13 @@ function renderHabitosHoy(el) {
       })
       .join('')}
   `;
+  el.querySelectorAll('[data-mood]').forEach((b) =>
+    b.addEventListener('click', () => {
+      DB.moods[today] = b.dataset.mood;
+      persist('moods');
+      renderHabitosHoy(el);
+    })
+  );
   el.querySelectorAll('[data-toggle]').forEach((b) =>
     b.addEventListener('click', () => {
       const id = b.dataset.toggle;
@@ -515,6 +577,16 @@ function renderHabitosStats(el) {
       </div>
       <div class="chart">${bars.map((b) => `<div class="chart-bar ${b === Math.max(...bars) ? 'hi' : ''}" style="height:${Math.max(b, 3)}%"></div>`).join('')}</div>
       <div class="chart-labels"><span>hace 3sem</span><span>hace 2sem</span><span>pasada</span><span>esta</span></div>
+    </div>
+    <div class="section-label">Ánimo últimos 7 días</div>
+    <div class="card row" style="justify-content:space-between;">
+      ${[6, 5, 4, 3, 2, 1, 0]
+        .map((i) => {
+          const d = daysAgo(i);
+          const m = DB.moods[d];
+          return `<div style="text-align:center;"><div style="font-size:20px;">${m || '·'}</div><div class="card-sub" style="font-size:9px;">${fmtDate(d)}</div></div>`;
+        })
+        .join('')}
     </div>
     <div class="section-label">Nivel</div>
     <div class="card">
@@ -880,11 +952,13 @@ let fitnessTab = 'log';
 function renderFitness(el) {
   const tools = [
     { id: 'log', label: 'Entrenos' },
+    { id: 'carga', label: 'Sobrecarga' },
     { id: 'rutinas', label: 'Rutinas' },
     { id: 'peso', label: 'Peso' },
     { id: 'timer', label: 'Descanso' },
     { id: 'recuperacion', label: 'Recuperación' },
     { id: 'metas', label: 'Metas' },
+    { id: 'comidas', label: 'Comidas' },
   ];
   el.innerHTML = `${tabsHtml(tools, fitnessTab)}<div id="fitPanel"></div>`;
   wireTabs(el, tools, (t) => {
@@ -894,12 +968,150 @@ function renderFitness(el) {
   const panel = document.getElementById('fitPanel');
   ({
     log: renderFitLog,
+    carga: renderFitOverload,
     rutinas: renderFitRoutines,
     peso: renderFitWeight,
     timer: renderFitTimer,
     recuperacion: renderFitRecovery,
     metas: renderFitGoals,
+    comidas: renderFitMeals,
   }[fitnessTab])(panel);
+}
+
+/* ---- Sobrecarga progresiva ---- */
+
+function computeOverloadSuggestions() {
+  const byExercise = {};
+  DB.workouts
+    .slice()
+    .sort((a, b) => (a.date < b.date ? -1 : 1))
+    .forEach((w) => {
+      (w.exercises || []).forEach((e) => {
+        const key = e.name.trim().toLowerCase();
+        if (!key) return;
+        const weight = parseFloat(e.weight) || 0;
+        const reps = parseInt(e.reps) || 0;
+        if (!byExercise[key]) byExercise[key] = [];
+        byExercise[key].push({ date: w.date, displayName: e.name, weight, reps });
+      });
+    });
+  return Object.values(byExercise).map((entries) => {
+    const last = entries[entries.length - 1];
+    const prev = entries[entries.length - 2];
+    let suggestedWeight = last.weight;
+    let suggestedReps = last.reps;
+    let note = 'Consolida esta carga antes de subir.';
+    if (last.weight > 0) {
+      if (last.reps >= 10) {
+        suggestedWeight = Math.round((last.weight + (last.weight >= 40 ? 2.5 : 1) ) * 10) / 10;
+        suggestedReps = 8;
+        note = 'Llegaste a 10+ reps: toca subir peso.';
+      } else if (last.reps >= 6) {
+        suggestedReps = last.reps + 1;
+        note = 'Mismo peso, busca una repetición más.';
+      } else if (prev && prev.weight === last.weight && prev.reps >= last.reps) {
+        note = 'Llevas 2 sesiones igual: mantén el peso y enfócate en técnica.';
+      }
+    }
+    return { name: last.displayName, lastWeight: last.weight, lastReps: last.reps, suggestedWeight, suggestedReps, note, date: last.date };
+  });
+}
+
+function renderFitOverload(el) {
+  const sug = computeOverloadSuggestions();
+  el.innerHTML = `
+    <div class="card-sub mb">Basado en tu último registro de cada ejercicio, con sobrecarga progresiva simple.</div>
+    ${
+      sug
+        .map(
+          (s) => `
+      <div class="card">
+        <div class="row between">
+          <span class="card-title">${esc(s.name)}</span>
+          <span class="card-sub">último: ${s.lastWeight}kg × ${s.lastReps}</span>
+        </div>
+        <div class="row between mt">
+          <span class="pill accent">Hoy: ${s.suggestedWeight}kg × ${s.suggestedReps}</span>
+        </div>
+        <div class="card-sub mt">${esc(s.note)}</div>
+      </div>`
+        )
+        .join('') || emptyState('Sin datos suficientes', 'Registra algún entreno con peso y reps para ver sugerencias aquí.')
+    }
+  `;
+}
+
+/* ---- Comidas ---- */
+
+const MEAL_BANK = [
+  { type: 'Desayuno', text: 'Huevos revueltos + tostada integral + fruta' },
+  { type: 'Desayuno', text: 'Yogur griego + avena + frutos secos' },
+  { type: 'Desayuno', text: 'Tortilla francesa de claras + aguacate' },
+  { type: 'Comida', text: 'Pechuga de pollo a la plancha + arroz + verdura al vapor' },
+  { type: 'Comida', text: 'Salmón al horno + patata + ensalada' },
+  { type: 'Comida', text: 'Lentejas con verduras + huevo duro' },
+  { type: 'Comida', text: 'Ternera picada + pasta integral + tomate' },
+  { type: 'Cena', text: 'Tortilla de un huevo + atún + ensalada' },
+  { type: 'Cena', text: 'Pavo a la plancha + verduras salteadas' },
+  { type: 'Cena', text: 'Revuelto de champiñones + queso fresco' },
+  { type: 'Snack', text: 'Yogur natural + un puñado de nueces' },
+  { type: 'Snack', text: 'Queso fresco batido + fruta' },
+  { type: 'Snack', text: 'Puñado de almendras + una pieza de fruta' },
+  { type: 'Snack', text: 'Batido de proteína + plátano' },
+];
+
+const SUGAR_SWAPS = [
+  'Fruta entera en vez de zumo o dulce envasado',
+  'Yogur natural con canela en vez de yogur azucarado',
+  'Un puñado de dátiles si el antojo es fuerte, en vez de bollería',
+  'Infusión o café en vez de refresco',
+  'Chocolate negro (85%+) en vez de chocolate con leche',
+  'Fruta congelada (tipo uvas) como si fuera un helado',
+];
+
+function renderFitMeals(el) {
+  el.innerHTML = `
+    <div class="section-label">¿Qué como hoy?</div>
+    <button class="btn btn-accent mb" id="mealShuffle" style="width:100%;padding:12px;">🎲 Dame una idea</button>
+    <div id="mealSuggestion"></div>
+
+    <div class="section-label">Si te entra el antojo de azúcar</div>
+    ${SUGAR_SWAPS.map((s) => `<div class="card"><div class="card-sub">${esc(s)}</div></div>`).join('')}
+
+    <div class="section-label">Tus comidas guardadas</div>
+    <div class="row mb" style="gap:6px;">
+      <input id="newMeal" placeholder="Añade tu propia comida..." />
+      <select id="newMealType" style="width:110px;">
+        <option>Desayuno</option><option>Comida</option><option>Cena</option><option>Snack</option>
+      </select>
+      <button class="btn btn-accent" id="addMeal">+</button>
+    </div>
+    ${
+      DB.mealIdeas
+        .map((m) => `<div class="card row between"><div><span class="pill">${esc(m.type)}</span> <span class="mt">${esc(m.text)}</span></div><button class="btn-ghost" data-delm="${m.id}">✕</button></div>`)
+        .join('') || ''
+    }
+  `;
+  document.getElementById('mealShuffle').addEventListener('click', () => {
+    const all = [...MEAL_BANK, ...DB.mealIdeas.map((m) => ({ type: m.type, text: m.text }))];
+    const pick = all[Math.floor(Math.random() * all.length)];
+    document.getElementById('mealSuggestion').innerHTML = `<div class="card" style="border-color:var(--accent);"><span class="pill accent">${esc(pick.type)}</span><div class="card-title mt">${esc(pick.text)}</div></div>`;
+  });
+  document.getElementById('addMeal').addEventListener('click', () => {
+    const text = document.getElementById('newMeal').value.trim();
+    if (!text) return;
+    const type = document.getElementById('newMealType').value;
+    DB.mealIdeas.unshift({ id: uid(), text, type });
+    persist('mealIdeas');
+    renderFitMeals(el);
+  });
+  el.querySelectorAll('[data-delm]').forEach((b) =>
+    b.addEventListener('click', () => {
+      DB.mealIdeas = DB.mealIdeas.filter((m) => m.id !== b.dataset.delm);
+      persist('mealIdeas');
+      renderFitMeals(el);
+    })
+  );
 }
 
 function gymStreak() {
