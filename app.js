@@ -110,10 +110,13 @@ function identityToast() {
   toast(IDENTITY_QUOTES[Math.floor(Math.random() * IDENTITY_QUOTES.length)]);
 }
 
-/* Puntos por defecto según el nivel del hábito — edítalos aquí cuando quieras. */
-const DEFAULT_POINTS = { nucleo: 100, mini: 20 };
-function habitPoints(h) {
-  return h.points != null && h.points !== '' ? Number(h.points) : DEFAULT_POINTS[h.level || 'mini'];
+/* Niveles de impacto de un hábito. */
+const LEVELS = [
+  { id: 'nucleo', label: 'Núcleo', icon: '⭐', hint: 'Define quién quieres ser' },
+  { id: 'mini', label: 'Mini hábitos', icon: '🔹', hint: 'Pequeños apoyos que sostienen lo importante' },
+];
+function levelMeta(id) {
+  return LEVELS.find((l) => l.id === id) || LEVELS[2];
 }
 
 /* ---------------- Sheet (formulario modal) ---------------- */
@@ -320,6 +323,7 @@ function renderHabitos(el) {
   const tools = [
     { id: 'hoy', label: 'Hoy' },
     { id: 'lista', label: 'Hábitos' },
+    { id: 'resumen', label: 'Resumen semanal' },
     { id: 'calendario', label: 'Calendario' },
     { id: 'stats', label: 'Estadísticas' },
     { id: 'archivo', label: 'Archivo' },
@@ -333,20 +337,38 @@ function renderHabitos(el) {
     renderHabitos(el);
   });
   const panel = document.getElementById('habitosPanel');
-  ({ hoy: renderHabitosHoy, lista: renderHabitosLista, calendario: renderHabitosCal, stats: renderHabitosStats, archivo: renderHabitosArchivo }[
-    habitosTab
-  ])(panel);
+  ({
+    hoy: renderHabitosHoy,
+    lista: renderHabitosLista,
+    resumen: renderHabitosResumen,
+    calendario: renderHabitosCal,
+    stats: renderHabitosStats,
+    archivo: renderHabitosArchivo,
+  }[habitosTab])(panel);
 }
 
 function activeHabits() {
   return DB.habits.filter((h) => !h.archived);
 }
-function coreHabits(list) {
-  return (list || activeHabits()).filter((h) => (h.level || 'mini') === 'nucleo');
+function habitsAtLevel(levelId, list) {
+  return (list || activeHabits()).filter((h) => (h.level || 'mini') === levelId);
 }
-function miniHabits(list) {
-  return (list || activeHabits()).filter((h) => (h.level || 'mini') !== 'nucleo');
-}
+
+// Migración: vuelta al sistema de 2 niveles. 'importante' y 'complementario' pasan a 'mini'.
+(function migrateLevels() {
+  let changed = false;
+  DB.habits.forEach((h) => {
+    if (h.level === 'importante' || h.level === 'complementario' || !h.level) {
+      h.level = h.level === 'nucleo' ? 'nucleo' : 'mini';
+      changed = true;
+    }
+    if ('points' in h) {
+      delete h.points;
+      changed = true;
+    }
+  });
+  if (changed) persist('habits');
+})();
 
 function habitStreak(h) {
   let streak = 0;
@@ -363,6 +385,8 @@ function habitStreak(h) {
   return streak;
 }
 
+let hoyCollapse = { nucleo: false, mini: false };
+
 function renderHabitosHoy(el) {
   const list = activeHabits();
   const today = todayStr();
@@ -375,20 +399,21 @@ function renderHabitosHoy(el) {
   const moodOptions = ['😴', '😐', '🙂', '🔥', '😤'];
   const currentMood = DB.moods[today];
 
-  function habitCard(h, isCore) {
+  function habitCard(h) {
     const val = log[h.id];
     const done = h.type === 'bool' ? val === true : (val || 0) >= (h.target || 1);
     const streak = habitStreak(h);
     return `
-    <div class="card ${isCore ? 'core-card' : 'mini-card'}" data-habit="${h.id}">
+    <div class="card ${h.level === 'nucleo' ? 'core-card' : 'mini-card'}" data-habit="${h.id}">
       <div class="row between">
         <div class="row" style="gap:12px;">
           <button class="checkbox ${done ? 'checked' : ''}" data-toggle="${h.id}">${done ? '✓' : ''}</button>
           <div>
-            <div class="card-title">${esc(h.name)}</div>
+            <div class="card-title" data-detail="${h.id}" style="cursor:pointer;">${esc(h.name)} <span style="color:var(--muted);font-size:11px;">ⓘ</span></div>
             <div class="card-sub">${h.category ? esc(h.category) + ' · ' : ''}${
       h.type === 'qty' ? `${val || 0}/${h.target} ${esc(h.unit || '')}` : streak > 0 ? `🔥 ${streak} días seguidos` : 'empieza hoy tu racha'
     }</div>
+            ${h.notes ? `<div class="card-sub" style="font-style:italic;margin-top:2px;">${esc(h.notes)}</div>` : ''}
           </div>
         </div>
         ${h.type === 'qty' ? `<button class="btn" data-qty="${h.id}">+${h.step || 1}</button>` : ''}
@@ -396,8 +421,27 @@ function renderHabitosHoy(el) {
     </div>`;
   }
 
-  const core = coreHabits(list);
-  const mini = miniHabits(list);
+  function levelSection(level) {
+    const habits = habitsAtLevel(level.id, list);
+    const collapsed = hoyCollapse[level.id];
+    const doneCount = habits.filter((h) => {
+      const val = log[h.id];
+      return h.type === 'bool' ? val === true : (val || 0) >= (h.target || 1);
+    }).length;
+    return `
+      <button class="section-toggle" data-collapse="${level.id}">
+        <span class="section-label" style="margin:0;">${level.icon} ${level.label}</span>
+        <span class="row" style="gap:8px;">
+          <span class="card-sub">${doneCount}/${habits.length}</span>
+          <span class="chevron ${collapsed ? '' : 'open'}">▾</span>
+        </span>
+      </button>
+      <div class="card-sub" style="margin:-2px 0 8px;">${level.hint}</div>
+      <div class="${collapsed ? 'collapsed' : ''}">
+        ${habits.map(habitCard).join('') || `<div class="card-sub mb">Sin hábitos en este nivel.</div>`}
+      </div>
+    `;
+  }
 
   el.innerHTML = `
     <div class="card" style="text-align:center;border-color:var(--accent);">
@@ -414,14 +458,7 @@ function renderHabitosHoy(el) {
           .join('')}
       </div>
     </div>
-
-    <div class="section-label">⭐ Hábitos núcleo</div>
-    <div class="card-sub mb" style="margin-top:-6px;">Los que definen quién quieres ser.</div>
-    ${core.map((h) => habitCard(h, true)).join('') || `<div class="card-sub mb">Aún no has marcado ningún hábito como núcleo.</div>`}
-
-    <div class="section-label">🔹 Mini hábitos</div>
-    <div class="card-sub mb" style="margin-top:-6px;">Pequeños apoyos que sostienen lo importante.</div>
-    ${mini.map((h) => habitCard(h, false)).join('') || `<div class="card-sub mb">Sin mini hábitos activos.</div>`}
+    ${LEVELS.map(levelSection).join('')}
   `;
   el.querySelectorAll('[data-mood]').forEach((b) =>
     b.addEventListener('click', () => {
@@ -430,9 +467,18 @@ function renderHabitosHoy(el) {
       renderHabitosHoy(el);
     })
   );
+  el.querySelectorAll('[data-collapse]').forEach((b) =>
+    b.addEventListener('click', () => {
+      hoyCollapse[b.dataset.collapse] = !hoyCollapse[b.dataset.collapse];
+      renderHabitosHoy(el);
+    })
+  );
+  el.querySelectorAll('[data-detail]').forEach((b) =>
+    b.addEventListener('click', () => habitDetailSheet(DB.habits.find((x) => x.id === b.dataset.detail)))
+  );
   function afterComplete() {
-    checkRewards();
     const nowLog = DB.habitLogs[today] || {};
+    const core = habitsAtLevel('nucleo', list);
     const allCoreDone = core.length > 0 && core.every((h) => (h.type === 'bool' ? nowLog[h.id] === true : (nowLog[h.id] || 0) >= (h.target || 1)));
     if (allCoreDone) toast('Hoy has avanzado por EL CAMINO REAL.');
     else identityToast();
@@ -440,16 +486,11 @@ function renderHabitosHoy(el) {
   el.querySelectorAll('[data-toggle]').forEach((b) =>
     b.addEventListener('click', () => {
       const id = b.dataset.toggle;
-      const h = DB.habits.find((x) => x.id === id);
       DB.habitLogs[today] = DB.habitLogs[today] || {};
       const cur = DB.habitLogs[today][id];
       const willComplete = !(cur === true);
       DB.habitLogs[today][id] = willComplete ? true : false;
-      if (willComplete) {
-        DB.profile.points = (DB.profile.points || 0) + habitPoints(h);
-        persist('profile');
-        afterComplete();
-      }
+      if (willComplete) afterComplete();
       persist('habitLogs');
       renderHabitosHoy(el);
     })
@@ -463,11 +504,7 @@ function renderHabitosHoy(el) {
       const wasComplete = cur >= (h.target || 1);
       DB.habitLogs[today][id] = cur + (h.step || 1);
       const nowComplete = DB.habitLogs[today][id] >= (h.target || 1);
-      if (nowComplete && !wasComplete) {
-        DB.profile.points = (DB.profile.points || 0) + habitPoints(h);
-        persist('profile');
-        afterComplete();
-      }
+      if (nowComplete && !wasComplete) afterComplete();
       persist('habitLogs');
       renderHabitosHoy(el);
     })
@@ -475,38 +512,59 @@ function renderHabitosHoy(el) {
 }
 
 function renderHabitosLista(el) {
-  function card(h) {
+  function row(h) {
     return `
       <div class="card">
         <div class="row between">
           <div>
-            <div class="card-title">${h.level === 'nucleo' ? '⭐' : '🔹'} ${esc(h.name)}</div>
-            <div class="card-sub">${esc(h.category || 'General')} · ${h.type === 'qty' ? `objetivo ${h.target} ${esc(h.unit || '')}` : h.flex ? 'flexible' : 'todo o nada'} · ${habitPoints(h)} pts</div>
+            <div class="card-title" data-detail="${h.id}" style="cursor:pointer;">${esc(h.name)} <span style="color:var(--muted);font-size:11px;">ⓘ</span></div>
+            <div class="card-sub">${esc(h.category || 'General')} · ${h.type === 'qty' ? `objetivo ${h.target} ${esc(h.unit || '')}` : h.flex ? 'flexible' : 'todo o nada'}</div>
+            ${h.notes ? `<div class="card-sub mt" style="font-style:italic;">${esc(h.notes)}</div>` : ''}
           </div>
         </div>
-        <div class="row mt" style="gap:6px;">
-          <button class="btn" data-edit="${h.id}">Editar</button>
-          <button class="btn-ghost" data-archive="${h.id}">Archivar</button>
-          <button class="btn-ghost" data-delete="${h.id}" style="color:var(--warn);">Borrar</button>
+        <div class="row between mt">
+          <div class="move-btns">
+            ${LEVELS.map((l) => `<button class="move-btn ${h.level === l.id ? 'current' : ''}" data-move="${h.id}" data-level="${l.id}" title="Mover a ${l.label}">${l.icon}</button>`).join('')}
+          </div>
+          <div class="row" style="gap:6px;">
+            <button class="btn" data-edit="${h.id}">Editar</button>
+            <button class="btn-ghost" data-archive="${h.id}">Archivar</button>
+            <button class="btn-ghost" data-delete="${h.id}" style="color:var(--warn);">Borrar</button>
+          </div>
         </div>
       </div>`;
   }
-  const core = coreHabits();
-  const mini = miniHabits();
   el.innerHTML = `
     <button class="btn btn-accent mb" id="addHabit" style="width:100%;padding:12px;">+ Nuevo hábito</button>
-    <div class="row between mb">
-      <span class="card-sub">Puntos totales acumulados</span>
-      <span class="pill accent">${DB.profile.points || 0} pts</span>
+    <div class="card-sub mb">Toca uno de los iconos de cada tarjeta para moverla de categoría al instante.</div>
+    <div class="level-board">
+      ${LEVELS.map(
+        (l) => `
+        <div>
+          <div class="level-column-header">
+            <span class="section-label" style="margin-top:0;">${l.icon} ${l.label}</span>
+            <span class="card-sub">${habitsAtLevel(l.id).length}</span>
+          </div>
+          <div class="card-sub mb" style="margin-top:-4px;">${l.hint}</div>
+          ${habitsAtLevel(l.id).map(row).join('') || `<div class="card-sub mb">Sin hábitos aquí todavía.</div>`}
+        </div>`
+      ).join('')}
     </div>
-    <div class="section-label">⭐ Hábitos núcleo</div>
-    ${core.map(card).join('') || `<div class="card-sub mb">Los que definen tu identidad. Añade el primero.</div>`}
-    <div class="section-label">🔹 Mini hábitos</div>
-    ${mini.map(card).join('') || `<div class="card-sub mb">Pequeños apoyos diarios.</div>`}
   `;
   document.getElementById('addHabit').addEventListener('click', () => habitForm());
+  el.querySelectorAll('[data-detail]').forEach((b) =>
+    b.addEventListener('click', () => habitDetailSheet(DB.habits.find((x) => x.id === b.dataset.detail)))
+  );
   el.querySelectorAll('[data-edit]').forEach((b) =>
     b.addEventListener('click', () => habitForm(DB.habits.find((x) => x.id === b.dataset.edit)))
+  );
+  el.querySelectorAll('[data-move]').forEach((b) =>
+    b.addEventListener('click', () => {
+      const h = DB.habits.find((x) => x.id === b.dataset.move);
+      h.level = b.dataset.level;
+      persist('habits');
+      renderHabitosLista(el);
+    })
   );
   el.querySelectorAll('[data-archive]').forEach((b) =>
     b.addEventListener('click', () => {
@@ -537,10 +595,9 @@ function habitForm(existing) {
     `
     <div class="field"><label class="field-label">Nombre</label><input id="hName" placeholder="Leer, beber agua, gym..." value="${esc(existing?.name || '')}" /></div>
     <div class="field"><label class="field-label">Categoría</label><input id="hCat" placeholder="Fitness, mente, contenido..." value="${esc(existing?.category || '')}" /></div>
-    <div class="field"><label class="field-label">Nivel del hábito</label>
+    <div class="field"><label class="field-label">Nivel de impacto</label>
       <select id="hLevel">
-        <option value="nucleo" ${existing?.level === 'nucleo' ? 'selected' : ''}>⭐ Núcleo — define quién soy</option>
-        <option value="mini" ${(!existing || existing.level !== 'nucleo') ? 'selected' : ''}>🔹 Mini — apoyo diario</option>
+        ${LEVELS.map((l) => `<option value="${l.id}" ${(existing?.level || 'mini') === l.id ? 'selected' : ''}>${l.icon} ${l.label} — ${l.hint}</option>`).join('')}
       </select>
     </div>
     <div class="field"><label class="field-label">Tipo</label>
@@ -556,16 +613,12 @@ function habitForm(existing) {
     <div class="row" style="margin-bottom:12px;">
       <label class="row" style="gap:8px;font-size:14px;"><input type="checkbox" id="hFlex" style="width:auto;" ${existing?.flex ? 'checked' : ''} /> Flexible (puedo saltarme 1 vez/semana)</label>
     </div>
-    <div class="field"><label class="field-label">Puntos por completarlo</label><input id="hPoints" type="number" placeholder="${DEFAULT_POINTS[existing?.level === 'nucleo' ? 'nucleo' : 'mini']}" value="${existing?.points ?? ''}" /></div>
+    <div class="field"><label class="field-label">Descripción / notas</label><textarea id="hNotes" placeholder="De qué va este hábito, por qué lo haces, notas importantes...">${esc(existing?.notes || '')}</textarea></div>
     <button class="btn btn-accent" id="hSave" style="width:100%;padding:12px;">${isEdit ? 'Guardar cambios' : 'Crear hábito'}</button>
   `,
     (body) => {
       body.querySelector('#hType').addEventListener('change', (e) => {
         body.querySelector('#qtyFields').style.display = e.target.value === 'qty' ? 'block' : 'none';
-      });
-      body.querySelector('#hLevel').addEventListener('change', (e) => {
-        const pointsInput = body.querySelector('#hPoints');
-        pointsInput.placeholder = DEFAULT_POINTS[e.target.value];
       });
       body.querySelector('#hSave').addEventListener('click', () => {
         const name = body.querySelector('#hName').value.trim();
@@ -579,7 +632,7 @@ function habitForm(existing) {
           unit: body.querySelector('#hUnit').value.trim(),
           step: 1,
           flex: body.querySelector('#hFlex').checked,
-          points: body.querySelector('#hPoints').value === '' ? null : Number(body.querySelector('#hPoints').value),
+          notes: body.querySelector('#hNotes').value.trim(),
         };
         if (isEdit) {
           Object.assign(existing, data);
@@ -594,6 +647,126 @@ function habitForm(existing) {
       });
     }
   );
+}
+
+function habitDetailSheet(h) {
+  const streak = habitStreak(h);
+  let totalDone = 0;
+  let totalTracked = 0;
+  Object.keys(DB.habitLogs).forEach((date) => {
+    const val = DB.habitLogs[date][h.id];
+    if (val === undefined) return;
+    totalTracked++;
+    if (h.type === 'bool' ? val === true : val >= (h.target || 1)) totalDone++;
+  });
+  const days30 = [];
+  for (let i = 29; i >= 0; i--) {
+    const iso = daysAgo(i);
+    const val = (DB.habitLogs[iso] || {})[h.id];
+    const done = h.type === 'bool' ? val === true : (val || 0) >= (h.target || 1);
+    days30.push(done);
+  }
+  openSheet(
+    `${h.level === 'nucleo' ? '⭐' : '🔹'} ${h.name}`,
+    `
+    <div class="row" style="gap:8px;flex-wrap:wrap;">
+      <span class="pill ${h.level === 'nucleo' ? 'accent' : ''}">${h.level === 'nucleo' ? 'Núcleo' : 'Mini'}</span>
+      ${h.category ? `<span class="pill">${esc(h.category)}</span>` : ''}
+      ${h.flex ? `<span class="pill">flexible</span>` : ''}
+    </div>
+    ${
+      h.notes
+        ? `<div class="section-label">Tu porqué</div><div class="card"><div class="card-sub" style="font-style:italic;">"${esc(h.notes)}"</div></div>`
+        : `<div class="card-sub mt">Sin notas todavía — edítalo para escribir por qué haces este hábito.</div>`
+    }
+    <div class="section-label">Racha actual</div>
+    <div class="card row between"><span class="card-title">🔥 ${streak} días seguidos</span></div>
+    <div class="section-label">Últimos 30 días</div>
+    <div class="row" style="flex-wrap:wrap;gap:4px;">
+      ${days30.map((d) => `<div style="width:16px;height:16px;border-radius:4px;background:${d ? 'var(--accent)' : 'var(--surface-2)'};"></div>`).join('')}
+    </div>
+    <div class="card-sub mt">${totalDone} veces cumplido de ${totalTracked} días registrados en total.</div>
+    <button class="btn btn-accent mt" id="dhEdit" style="width:100%;padding:12px;">Editar este hábito</button>
+  `,
+    (body) => {
+      body.querySelector('#dhEdit').addEventListener('click', () => {
+        closeSheet();
+        setTimeout(() => habitForm(h), 260);
+      });
+    }
+  );
+}
+
+function renderHabitosResumen(el) {
+  const list = activeHabits();
+  if (!list.length) return (el.innerHTML = emptyState('Sin hábitos todavía', 'El resumen aparecerá cuando tengas hábitos activos.'));
+
+  // Semana actual, de lunes a hoy.
+  const now = new Date();
+  const dow = (now.getDay() + 6) % 7; // lunes = 0
+  const daysElapsed = dow + 1;
+
+  const rows = list.map((h) => {
+    let done = 0;
+    for (let i = 0; i < daysElapsed; i++) {
+      const iso = daysAgo(i);
+      const dayLog = DB.habitLogs[iso] || {};
+      if (h.type === 'bool' ? dayLog[h.id] === true : (dayLog[h.id] || 0) >= (h.target || 1)) done++;
+    }
+    return { h, done, pct: Math.round((done / daysElapsed) * 100) };
+  });
+
+  const core = rows.filter((r) => r.h.level === 'nucleo');
+  const best = rows.slice().sort((a, b) => b.pct - a.pct)[0];
+  const hardest = rows.slice().sort((a, b) => a.pct - b.pct)[0];
+  const coreAvg = core.length ? Math.round(core.reduce((s, r) => s + r.pct, 0) / core.length) : null;
+
+  let narrative = '';
+  if (coreAvg !== null) {
+    if (coreAvg >= 80) narrative = `Esta semana has sostenido tus hábitos núcleo casi al completo (${coreAvg}% de media). Eso es identidad construida, no suerte.`;
+    else if (coreAvg >= 50) narrative = `Vas a mitad de camino con tus hábitos núcleo (${coreAvg}% de media). No ha sido perfecto, pero has vuelto al camino más veces de las que lo has dejado.`;
+    else narrative = `Esta semana ha costado sostener los hábitos núcleo (${coreAvg}% de media). No es un fracaso, es información: quizás toca ajustar algo, no rendirte.`;
+  }
+
+  el.innerHTML = `
+    <div class="card" style="text-align:center;border-color:var(--accent);">
+      <div class="card-sub">Semana en curso · día ${daysElapsed} de 7</div>
+      <div class="card-title mt" style="font-size:16px;">${esc(narrative || 'Aún no hay datos suficientes esta semana.')}</div>
+    </div>
+
+    ${
+      best
+        ? `<div class="card">
+      <div class="card-sub">Lo que mejor te ha salido</div>
+      <div class="card-title mt">${best.h.level === 'nucleo' ? '⭐' : '🔹'} ${esc(best.h.name)} — ${best.pct}%</div>
+    </div>`
+        : ''
+    }
+    ${
+      hardest && hardest.h.id !== best?.h.id
+        ? `<div class="card">
+      <div class="card-sub">Lo que más te ha costado</div>
+      <div class="card-title mt">${hardest.h.level === 'nucleo' ? '⭐' : '🔹'} ${esc(hardest.h.name)} — ${hardest.pct}%</div>
+      <div class="card-sub mt">Sin culpa: mañana es otra oportunidad de volver al camino.</div>
+    </div>`
+        : ''
+    }
+
+    <div class="section-label">Todos los hábitos esta semana</div>
+    ${rows
+      .slice()
+      .sort((a, b) => b.pct - a.pct)
+      .map(
+        (r) => `
+      <div class="card">
+        <div class="row between"><span class="card-title">${r.h.level === 'nucleo' ? '⭐' : '🔹'} ${esc(r.h.name)}</span><span class="card-sub">${r.done}/${daysElapsed} días</span></div>
+        <div class="progress-bar"><div class="progress-fill" style="width:${r.pct}%"></div></div>
+      </div>`
+      )
+      .join('')}
+
+    <div class="card-sub mt" style="text-align:center;">Repasa esta pantalla los domingos para cerrar tu semana con perspectiva, no con nota.</div>
+  `;
 }
 
 function renderHabitosCal(el) {
@@ -670,11 +843,22 @@ function renderHabitosStats(el) {
         })
         .join('')}
     </div>
-    <div class="section-label">Nivel</div>
-    <div class="card">
-      <div class="row between"><span class="card-title">Nivel ${Math.floor((DB.profile.points || 0) / 100) + 1}</span><span class="pill accent">${DB.profile.points || 0} pts</span></div>
-      <div class="progress-bar"><div class="progress-fill" style="width:${(DB.profile.points || 0) % 100}%"></div></div>
-    </div>
+    <div class="section-label">Consistencia por nivel esta semana</div>
+    ${LEVELS.map((l) => {
+      const habits = habitsAtLevel(l.id);
+      if (!habits.length) return '';
+      let total = 0, done = 0;
+      for (let i = 0; i < 7; i++) {
+        const iso = daysAgo(i);
+        const dayLog = DB.habitLogs[iso] || {};
+        habits.forEach((h) => {
+          total++;
+          if (h.type === 'bool' ? dayLog[h.id] === true : (dayLog[h.id] || 0) >= (h.target || 1)) done++;
+        });
+      }
+      const pct = total ? Math.round((done / total) * 100) : 0;
+      return `<div class="card"><div class="row between"><span class="card-title">${l.icon} ${l.label}</span><span class="card-sub">${pct}%</span></div><div class="progress-bar"><div class="progress-fill" style="width:${pct}%"></div></div></div>`;
+    }).join('')}
     <div class="section-label">Objetivos vinculados</div>
     ${
       DB.goals.map((g) => `<div class="card"><div class="card-title">${esc(g.title)}</div></div>`).join('') ||
@@ -717,18 +901,6 @@ function renderHabitosArchivo(el) {
       renderHabitosArchivo(el);
     })
   );
-}
-
-function checkRewards() {
-  const p = DB.profile.points || 0;
-  const milestones = [50, 100, 250, 500, 1000];
-  milestones.forEach((m) => {
-    if (p >= m && !DB.rewards.unlocked.includes(m)) {
-      DB.rewards.unlocked.push(m);
-      persist('rewards');
-      toast(`🏆 Insignia desbloqueada: ${m} puntos`);
-    }
-  });
 }
 
 function emptyState(title, sub) {
@@ -1518,7 +1690,6 @@ function renderExtra(el) {
   const tools = [
     { id: 'countdown', label: 'Fechas clave' },
     { id: 'viaje', label: 'Modo viaje' },
-    { id: 'recompensas', label: 'Recompensas' },
     { id: 'pomodoro', label: 'Enfoque' },
     { id: 'contactos', label: 'Apoyo' },
   ];
@@ -1531,7 +1702,6 @@ function renderExtra(el) {
   ({
     countdown: renderCountdowns,
     viaje: renderTravelMode,
-    recompensas: renderRewardsPanel,
     pomodoro: renderPomodoro,
     contactos: renderContacts,
   }[extraTab])(panel);
@@ -1579,24 +1749,6 @@ function renderTravelMode(el) {
   });
 }
 
-function renderRewardsPanel(el) {
-  const milestones = [50, 100, 250, 500, 1000];
-  el.innerHTML = `
-    <div class="card-sub mb">Se desbloquean automáticamente al sumar puntos cumpliendo hábitos.</div>
-    <div class="grid-2">
-      ${milestones
-        .map(
-          (m) => `
-        <div class="card" style="text-align:center;opacity:${DB.rewards.unlocked.includes(m) ? '1' : '0.4'}">
-          <div class="display" style="font-size:26px;">${DB.rewards.unlocked.includes(m) ? '🏆' : '🔒'}</div>
-          <div class="card-sub">${m} pts</div>
-        </div>`
-        )
-        .join('')}
-    </div>
-  `;
-}
-
 function renderPomodoro(el) {
   el.innerHTML = `
     <div class="row mb" style="gap:8px;"><input id="pomoMin" type="number" value="${DB.pomodoro.minutes}" placeholder="Minutos" /><button class="btn btn-accent" id="pomoStart">Empezar sesión de enfoque</button></div>
@@ -1619,10 +1771,7 @@ function renderPomodoro(el) {
       if (remaining <= 0) {
         clearInterval(interval);
         running = false;
-        DB.profile.points = (DB.profile.points || 0) + 15;
-        persist('profile');
-        checkRewards();
-        toast('Sesión de enfoque completada 🔥 +15 pts');
+        toast('Sesión de enfoque completada 🔥');
       }
       remaining--;
     };

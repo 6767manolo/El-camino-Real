@@ -371,6 +371,39 @@ input:focus, textarea:focus, select:focus, button:focus-visible {
 .card.mini-card .card-title { font-size: 14px; font-weight: 500; }
 .card.mini-card .checkbox { width: 20px; height: 20px; border-radius: 6px; }
 
+.section-toggle {
+  width: 100%;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 6px 0;
+  margin-top: 14px;
+}
+.chevron { color: var(--muted); transition: transform 0.25s; display: inline-block; }
+.chevron.open { transform: rotate(180deg); }
+.collapsed { display: none; }
+
+.level-board {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+.level-column-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.move-btns { display: flex; gap: 4px; }
+.move-btn {
+  font-size: 15px;
+  width: 30px;
+  height: 30px;
+  border-radius: 8px;
+  background: var(--surface-2);
+  border: 1px solid var(--line);
+}
+.move-btn.current { border-color: var(--accent); background: rgba(255,90,31,0.15); }
+
 .section-label {
   font-size: 11px;
   text-transform: uppercase;
