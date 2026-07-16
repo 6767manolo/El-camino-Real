@@ -74,6 +74,7 @@ const DB = {
   pomodoro: load('pomodoro', { minutes: 25 }),
   moods: load('moods', {}), // {date: 'emoji'}
   mealIdeas: load('mealIdeas', []), // {id, text, type} type: desayuno/comida/cena/snack
+  tasks: load('tasks', []), // {id, date, text, time, done}
 };
 
 function persist(key) {
@@ -243,22 +244,56 @@ function updatePath() {
   fill.style.left = activeSlide * pct + '%';
 }
 
+const SECTION_TOOLS = {
+  habitos: [
+    { id: 'hoy', label: 'Hoy', icon: '✓', hint: 'Marca tus hábitos de hoy' },
+    { id: 'lista', label: 'Hábitos', icon: '📋', hint: 'Crea, edita y organiza' },
+    { id: 'resumen', label: 'Resumen semanal', icon: '📊', hint: 'Cómo va tu semana' },
+    { id: 'calendario', label: 'Calendario', icon: '🗓️', hint: 'Vista mensual completa' },
+    { id: 'stats', label: 'Estadísticas', icon: '📈', hint: 'Consistencia y ánimo' },
+    { id: 'archivo', label: 'Archivo', icon: '🗄️', hint: 'Hábitos pausados' },
+  ],
+  ugoh: [
+    { id: 'ideas', label: 'Ideas', icon: '💡', hint: 'Banco de ideas sueltas' },
+    { id: 'videos', label: 'Vídeos', icon: '🎬', hint: 'Guion y producción' },
+    { id: 'hooks', label: 'Hooks', icon: '🪝', hint: 'Ganchos guardados' },
+    { id: 'stats', label: 'Subs / Views', icon: '📈', hint: 'Evolución del canal' },
+    { id: 'seo', label: 'SEO', icon: '🏷️', hint: 'Tags y keywords' },
+    { id: 'metas', label: 'Metas', icon: '🎯', hint: 'Objetivos del canal' },
+    { id: 'camino', label: 'El camino real', icon: '🧭', hint: 'Misión y tiempos' },
+  ],
+  fitness: [
+    { id: 'log', label: 'Entrenos', icon: '📝', hint: 'Registra tu sesión' },
+    { id: 'carga', label: 'Sobrecarga', icon: '📶', hint: 'Qué levantar hoy' },
+    { id: 'rutinas', label: 'Rutinas', icon: '🗂️', hint: 'Plantillas guardadas' },
+    { id: 'peso', label: 'Peso', icon: '⚖️', hint: 'Evolución corporal' },
+    { id: 'timer', label: 'Descanso', icon: '⏱️', hint: 'Cronómetro entre series' },
+    { id: 'recuperacion', label: 'Recuperación', icon: '🩹', hint: 'Fases y objetivo' },
+    { id: 'metas', label: 'Metas', icon: '🏆', hint: 'Marcas físicas' },
+    { id: 'comidas', label: 'Comidas', icon: '🍽️', hint: 'Ideas y antiazúcar' },
+  ],
+  extra: [
+    { id: 'countdown', label: 'Fechas clave', icon: '⏳', hint: 'Cuentas atrás' },
+    { id: 'viaje', label: 'Modo viaje', icon: '✈️', hint: 'Simplifica la app' },
+    { id: 'pomodoro', label: 'Enfoque', icon: '🎯', hint: 'Sesión sin distracciones' },
+    { id: 'contactos', label: 'Apoyo', icon: '🤝', hint: 'Gente clave' },
+  ],
+};
+
+const TOOL_RENDERERS = {
+  habitos: { hoy: renderHabitosHoy, lista: renderHabitosLista, resumen: renderHabitosResumen, calendario: renderHabitosCal, stats: renderHabitosStats, archivo: renderHabitosArchivo },
+  ugoh: { ideas: renderUgohIdeas, videos: renderUgohVideos, hooks: renderUgohHooks, stats: renderUgohStats, seo: renderUgohSeo, metas: renderUgohMetas, camino: renderUgohCamino },
+  fitness: { log: renderFitLog, carga: renderFitOverload, rutinas: renderFitRoutines, peso: renderFitWeight, timer: renderFitTimer, recuperacion: renderFitRecovery, metas: renderFitGoals, comidas: renderFitMeals },
+  extra: { countdown: renderCountdowns, viaje: renderTravelMode, pomodoro: renderPomodoro, contactos: renderContacts },
+};
+
+let currentSection = null;
+let currentTool = null;
+
 function openSection(id) {
-  const root = document.getElementById('sectionRoot');
-  const renderer = { habitos: renderHabitos, ugoh: renderUgoh, fitness: renderFitness, extra: renderExtra }[id];
-  const meta = SECTIONS.find((s) => s.id === id);
-  root.innerHTML = `
-    <div class="section-view" id="sectionView">
-      <div class="section-header">
-        <button class="back-btn" id="backBtn">‹</button>
-        <h1>${meta.label}</h1>
-      </div>
-      <div class="section-body" id="sectionBody"></div>
-    </div>
-  `;
-  document.getElementById('backBtn').addEventListener('click', closeSection);
-  requestAnimationFrame(() => document.getElementById('sectionView').classList.add('open'));
-  renderer(document.getElementById('sectionBody'));
+  currentSection = id;
+  currentTool = null;
+  renderSectionShell(true);
 }
 function closeSection() {
   const v = document.getElementById('sectionView');
@@ -266,17 +301,65 @@ function closeSection() {
     v.classList.remove('open');
     setTimeout(() => (document.getElementById('sectionRoot').innerHTML = ''), 400);
   }
+  currentSection = null;
+  currentTool = null;
 }
 
-function tabsHtml(tools, active) {
-  return `<div class="tabs">${tools
-    .map((t) => `<button class="tab ${t.id === active ? 'active' : ''}" data-tab="${t.id}">${t.label}</button>`)
-    .join('')}</div>`;
+function renderSectionShell(isFirstOpen) {
+  const meta = SECTIONS.find((s) => s.id === currentSection);
+  const tools = SECTION_TOOLS[currentSection];
+  const atMenu = !currentTool;
+  const root = document.getElementById('sectionRoot');
+  const title = atMenu ? meta.label : tools.find((t) => t.id === currentTool).label;
+
+  if (isFirstOpen) {
+    root.innerHTML = `
+      <div class="section-view" id="sectionView">
+        <div class="section-header">
+          <button class="back-btn" id="backBtn">‹</button>
+          <h1 id="sectionTitle">${title}</h1>
+        </div>
+        <div class="section-body" id="sectionBody"></div>
+      </div>
+    `;
+    requestAnimationFrame(() => document.getElementById('sectionView').classList.add('open'));
+  } else {
+    document.getElementById('sectionTitle').textContent = title;
+    document.getElementById('sectionBody').scrollTop = 0;
+  }
+  document.getElementById('backBtn').onclick = () => {
+    if (currentTool) {
+      currentTool = null;
+      renderSectionShell(false);
+    } else {
+      closeSection();
+    }
+  };
+  const body = document.getElementById('sectionBody');
+  if (atMenu) {
+    renderToolMenu(body, tools);
+  } else {
+    TOOL_RENDERERS[currentSection][currentTool](body);
+  }
 }
-function wireTabs(container, tools, onSwitch) {
-  container.querySelectorAll('[data-tab]').forEach((btn) => {
-    btn.addEventListener('click', () => onSwitch(btn.dataset.tab));
-  });
+
+function renderToolMenu(body, tools) {
+  body.innerHTML = `<div class="tool-grid">${tools
+    .map(
+      (t) => `
+    <button class="tool-btn" data-tool="${t.id}">
+      <div class="tool-icon">${t.icon}</div>
+      <div class="tool-label">${t.label}</div>
+      <div class="tool-hint">${t.hint}</div>
+    </button>`
+    )
+    .join('')}</div>`;
+  body.querySelectorAll('[data-tool]').forEach((b) =>
+    b.addEventListener('click', () => {
+      currentTool = b.dataset.tool;
+      renderSectionShell(false);
+    })
+  );
 }
 
 /* ---------------- Onboarding ---------------- */
@@ -387,21 +470,111 @@ function habitStreak(h) {
 
 let hoyCollapse = { nucleo: false, mini: false };
 
+function taskForm(existing) {
+  const isEdit = !!existing;
+  openSheet(
+    isEdit ? 'Editar tarea' : 'Nueva tarea de hoy',
+    `
+    <div class="field"><label class="field-label">¿Qué tienes que hacer?</label><input id="tText" placeholder="Llamar al médico, responder email..." value="${esc(existing?.text || '')}" /></div>
+    <div class="field"><label class="field-label">Hora (opcional)</label><input id="tTime" type="time" value="${esc(existing?.time || '')}" /></div>
+    <button class="btn btn-accent" id="tSave" style="width:100%;padding:12px;">${isEdit ? 'Guardar' : 'Añadir'}</button>
+  `,
+    (body) =>
+      body.querySelector('#tSave').addEventListener('click', () => {
+        const text = body.querySelector('#tText').value.trim();
+        if (!text) return toast('Escribe qué tienes que hacer');
+        const time = body.querySelector('#tTime').value;
+        if (isEdit) {
+          existing.text = text;
+          existing.time = time;
+        } else {
+          DB.tasks.push({ id: uid(), date: todayStr(), text, time, done: false });
+        }
+        persist('tasks');
+        closeSheet();
+        renderHabitosHoy(document.getElementById('sectionBody'));
+      })
+  );
+}
+
 function renderHabitosHoy(el) {
   const list = activeHabits();
   const today = todayStr();
   const log = DB.habitLogs[today] || {};
   const quote = quoteOfDay();
-  if (!list.length) {
-    el.innerHTML = emptyState('Aún no tienes hábitos', 'Añade el primero desde la pestaña "Hábitos".');
-    return;
-  }
   const moodOptions = ['😴', '😐', '🙂', '🔥', '😤'];
   const currentMood = DB.moods[today];
+  const todayTasks = DB.tasks.filter((t) => t.date === today);
+  const nowHM = `${String(new Date().getHours()).padStart(2, '0')}:${String(new Date().getMinutes()).padStart(2, '0')}`;
+
+  function isDone(h) {
+    const val = log[h.id];
+    return h.type === 'bool' ? val === true : (val || 0) >= (h.target || 1);
+  }
+
+  const scheduledHabits = list.filter((h) => h.time);
+  const unscheduledHabits = list.filter((h) => !h.time);
+  const scheduledTasks = todayTasks.filter((t) => t.time);
+  const unscheduledTasks = todayTasks.filter((t) => !t.time);
+
+  const timeline = [
+    ...scheduledHabits.map((h) => ({ kind: 'habit', time: h.time, ref: h })),
+    ...scheduledTasks.map((t) => ({ kind: 'task', time: t.time, ref: t })),
+  ].sort((a, b) => (a.time < b.time ? -1 : 1));
+
+  let nowInserted = false;
+  const timelineRows = [];
+  timeline.forEach((item) => {
+    if (!nowInserted && item.time >= nowHM) {
+      timelineRows.push({ nowMarker: true });
+      nowInserted = true;
+    }
+    timelineRows.push(item);
+  });
+  if (!nowInserted) timelineRows.push({ nowMarker: true });
+
+  function timelineRow(item) {
+    if (item.nowMarker) return `<div class="timeline-now"><span></span>ahora · ${nowHM}<span></span></div>`;
+    if (item.kind === 'habit') {
+      const h = item.ref;
+      const done = isDone(h);
+      return `
+        <div class="timeline-item">
+          <div class="timeline-time">${h.time}</div>
+          <div class="timeline-dot ${done ? 'done' : ''}"></div>
+          <div class="card ${h.level === 'nucleo' ? 'core-card' : 'mini-card'}" style="flex:1;">
+            <div class="row between">
+              <div class="row" style="gap:12px;">
+                <button class="checkbox ${done ? 'checked' : ''}" data-toggle="${h.id}">${done ? '✓' : ''}</button>
+                <div>
+                  <div class="card-title" data-detail="${h.id}" style="cursor:pointer;">${esc(h.name)} <span style="color:var(--muted);font-size:11px;">ⓘ</span></div>
+                  <div class="card-sub">${h.category ? esc(h.category) : (h.level === 'nucleo' ? 'Núcleo' : 'Mini')}</div>
+                </div>
+              </div>
+              ${h.type === 'qty' ? `<button class="btn" data-qty="${h.id}">+${h.step || 1}</button>` : ''}
+            </div>
+          </div>
+        </div>`;
+    }
+    const t = item.ref;
+    return `
+      <div class="timeline-item">
+        <div class="timeline-time">${t.time}</div>
+        <div class="timeline-dot ${t.done ? 'done' : ''}"></div>
+        <div class="card" style="flex:1;">
+          <div class="row between">
+            <div class="row" style="gap:12px;">
+              <button class="checkbox ${t.done ? 'checked' : ''}" data-tasktoggle="${t.id}">${t.done ? '✓' : ''}</button>
+              <div class="card-title">${esc(t.text)}</div>
+            </div>
+            <button class="btn-ghost" data-taskdel="${t.id}">✕</button>
+          </div>
+        </div>
+      </div>`;
+  }
 
   function habitCard(h) {
-    const val = log[h.id];
-    const done = h.type === 'bool' ? val === true : (val || 0) >= (h.target || 1);
+    const done = isDone(h);
     const streak = habitStreak(h);
     return `
     <div class="card ${h.level === 'nucleo' ? 'core-card' : 'mini-card'}" data-habit="${h.id}">
@@ -411,7 +584,7 @@ function renderHabitosHoy(el) {
           <div>
             <div class="card-title" data-detail="${h.id}" style="cursor:pointer;">${esc(h.name)} <span style="color:var(--muted);font-size:11px;">ⓘ</span></div>
             <div class="card-sub">${h.category ? esc(h.category) + ' · ' : ''}${
-      h.type === 'qty' ? `${val || 0}/${h.target} ${esc(h.unit || '')}` : streak > 0 ? `🔥 ${streak} días seguidos` : 'empieza hoy tu racha'
+      h.type === 'qty' ? `${log[h.id] || 0}/${h.target} ${esc(h.unit || '')}` : streak > 0 ? `🔥 ${streak} días seguidos` : 'empieza hoy tu racha'
     }</div>
             ${h.notes ? `<div class="card-sub" style="font-style:italic;margin-top:2px;">${esc(h.notes)}</div>` : ''}
           </div>
@@ -422,12 +595,9 @@ function renderHabitosHoy(el) {
   }
 
   function levelSection(level) {
-    const habits = habitsAtLevel(level.id, list);
+    const habits = habitsAtLevel(level.id, unscheduledHabits);
     const collapsed = hoyCollapse[level.id];
-    const doneCount = habits.filter((h) => {
-      const val = log[h.id];
-      return h.type === 'bool' ? val === true : (val || 0) >= (h.target || 1);
-    }).length;
+    const doneCount = habits.filter(isDone).length;
     return `
       <button class="section-toggle" data-collapse="${level.id}">
         <span class="section-label" style="margin:0;">${level.icon} ${level.label}</span>
@@ -458,8 +628,34 @@ function renderHabitosHoy(el) {
           .join('')}
       </div>
     </div>
+
+    <div class="row between">
+      <span class="section-label" style="margin-top:14px;">Tu día</span>
+      <button class="btn" id="addTask" style="margin-top:10px;">+ Tarea</button>
+    </div>
+    ${
+      timeline.length
+        ? `<div class="timeline">${timelineRows.map(timelineRow).join('')}</div>`
+        : `<div class="card-sub mb">Sin nada programado a una hora concreta. Añade una tarea o ponle hora a un hábito desde "Editar".</div>`
+    }
+
+    ${
+      unscheduledTasks.length
+        ? `<div class="section-label">Tareas sin hora</div>${unscheduledTasks
+            .map(
+              (t) => `
+      <div class="card row between">
+        <div class="row" style="gap:12px;"><button class="checkbox ${t.done ? 'checked' : ''}" data-tasktoggle="${t.id}">${t.done ? '✓' : ''}</button><span>${esc(t.text)}</span></div>
+        <button class="btn-ghost" data-taskdel="${t.id}">✕</button>
+      </div>`
+            )
+            .join('')}`
+        : ''
+    }
+
     ${LEVELS.map(levelSection).join('')}
   `;
+  document.getElementById('addTask').addEventListener('click', () => taskForm());
   el.querySelectorAll('[data-mood]').forEach((b) =>
     b.addEventListener('click', () => {
       DB.moods[today] = b.dataset.mood;
@@ -475,6 +671,21 @@ function renderHabitosHoy(el) {
   );
   el.querySelectorAll('[data-detail]').forEach((b) =>
     b.addEventListener('click', () => habitDetailSheet(DB.habits.find((x) => x.id === b.dataset.detail)))
+  );
+  el.querySelectorAll('[data-tasktoggle]').forEach((b) =>
+    b.addEventListener('click', () => {
+      const t = DB.tasks.find((x) => x.id === b.dataset.tasktoggle);
+      t.done = !t.done;
+      persist('tasks');
+      renderHabitosHoy(el);
+    })
+  );
+  el.querySelectorAll('[data-taskdel]').forEach((b) =>
+    b.addEventListener('click', () => {
+      DB.tasks = DB.tasks.filter((x) => x.id !== b.dataset.taskdel);
+      persist('tasks');
+      renderHabitosHoy(el);
+    })
   );
   function afterComplete() {
     const nowLog = DB.habitLogs[today] || {};
@@ -518,7 +729,7 @@ function renderHabitosLista(el) {
         <div class="row between">
           <div>
             <div class="card-title" data-detail="${h.id}" style="cursor:pointer;">${esc(h.name)} <span style="color:var(--muted);font-size:11px;">ⓘ</span></div>
-            <div class="card-sub">${esc(h.category || 'General')} · ${h.type === 'qty' ? `objetivo ${h.target} ${esc(h.unit || '')}` : h.flex ? 'flexible' : 'todo o nada'}</div>
+            <div class="card-sub">${esc(h.category || 'General')} · ${h.type === 'qty' ? `objetivo ${h.target} ${esc(h.unit || '')}` : h.flex ? 'flexible' : 'todo o nada'}${h.time ? ` · ⏰ ${h.time}` : ''}</div>
             ${h.notes ? `<div class="card-sub mt" style="font-style:italic;">${esc(h.notes)}</div>` : ''}
           </div>
         </div>
@@ -613,6 +824,7 @@ function habitForm(existing) {
     <div class="row" style="margin-bottom:12px;">
       <label class="row" style="gap:8px;font-size:14px;"><input type="checkbox" id="hFlex" style="width:auto;" ${existing?.flex ? 'checked' : ''} /> Flexible (puedo saltarme 1 vez/semana)</label>
     </div>
+    <div class="field"><label class="field-label">Hora del día (opcional)</label><input id="hTime" type="time" value="${esc(existing?.time || '')}" /></div>
     <div class="field"><label class="field-label">Descripción / notas</label><textarea id="hNotes" placeholder="De qué va este hábito, por qué lo haces, notas importantes...">${esc(existing?.notes || '')}</textarea></div>
     <button class="btn btn-accent" id="hSave" style="width:100%;padding:12px;">${isEdit ? 'Guardar cambios' : 'Crear hábito'}</button>
   `,
@@ -632,6 +844,7 @@ function habitForm(existing) {
           unit: body.querySelector('#hUnit').value.trim(),
           step: 1,
           flex: body.querySelector('#hFlex').checked,
+          time: body.querySelector('#hTime').value,
           notes: body.querySelector('#hNotes').value.trim(),
         };
         if (isEdit) {
@@ -672,6 +885,7 @@ function habitDetailSheet(h) {
     <div class="row" style="gap:8px;flex-wrap:wrap;">
       <span class="pill ${h.level === 'nucleo' ? 'accent' : ''}">${h.level === 'nucleo' ? 'Núcleo' : 'Mini'}</span>
       ${h.category ? `<span class="pill">${esc(h.category)}</span>` : ''}
+      ${h.time ? `<span class="pill">⏰ ${h.time}</span>` : ''}
       ${h.flex ? `<span class="pill">flexible</span>` : ''}
     </div>
     ${
