@@ -75,6 +75,9 @@ const DB = {
   moods: load('moods', {}), // {date: 'emoji'}
   mealIdeas: load('mealIdeas', []), // {id, text, type} type: desayuno/comida/cena/snack
   tasks: load('tasks', []), // {id, date, text, time, done}
+  nereaEpisodes: load('nereaEpisodes', []), // {id, date, time, trigger, intensity(1-5), protocol:'si'|'medias'|'no', note}
+  minimalDays: load('minimalDays', {}), // {date: [selectedIds]}
+  dailyMove: load('dailyMove', {}), // {date: text}
 };
 
 function persist(key) {
@@ -109,6 +112,22 @@ const IDENTITY_QUOTES = [
 ];
 function identityToast() {
   toast(IDENTITY_QUOTES[Math.floor(Math.random() * IDENTITY_QUOTES.length)]);
+}
+
+const SHIKAMARU_QUOTES = [
+  'Qué problemático... pero lo hago igual.',
+  'No hace falta mover todas las piezas, solo la que importa.',
+  'Pensar antes de moverte también es avanzar.',
+  'Ahorra energía para lo que de verdad pesa.',
+  'No todo merece tu esfuerzo completo.',
+  'Un buen estratega elige sus batallas, no las libra todas.',
+  'Parar a mirar las nubes no es perder el tiempo, es no perder la cabeza.',
+  'Hacer poco pero justo también es avanzar por el camino.',
+];
+function shikamaruQuoteOfDay() {
+  const d = new Date();
+  const idx = (d.getFullYear() * 372 + d.getMonth() * 31 + d.getDate() + 3) % SHIKAMARU_QUOTES.length;
+  return SHIKAMARU_QUOTES[idx];
 }
 
 /* Niveles de impacto de un hábito. */
@@ -149,7 +168,8 @@ const SECTIONS = [
   { id: 'habitos', label: 'HÁBITOS', sub: 'El camino, día a día' },
   { id: 'ugoh', label: 'UGOH', sub: 'El camino real · contenido' },
   { id: 'fitness', label: 'FITNESS', sub: 'Cuerpo y disciplina' },
-  { id: 'extra', label: 'EXTRA', sub: 'Todo lo demás' },
+  { id: 'nerea', label: 'NEREA', sub: 'Confianza en acción' },
+  { id: 'extra', label: 'SHIKAMARU', sub: 'Esfuerzo mínimo, movimiento justo' },
 ];
 
 let activeSlide = 0;
@@ -273,18 +293,21 @@ const SECTION_TOOLS = {
     { id: 'comidas', label: 'Comidas', icon: '🍽️', hint: 'Ideas y antiazúcar' },
   ],
   extra: [
-    { id: 'countdown', label: 'Fechas clave', icon: '⏳', hint: 'Cuentas atrás' },
-    { id: 'viaje', label: 'Modo viaje', icon: '✈️', hint: 'Simplifica la app' },
-    { id: 'pomodoro', label: 'Enfoque', icon: '🎯', hint: 'Sesión sin distracciones' },
-    { id: 'contactos', label: 'Apoyo', icon: '🤝', hint: 'Gente clave' },
+    { id: 'mentalidad', label: 'Mentalidad', icon: '☁️', hint: 'Léelo cada día' },
+    { id: 'minimo', label: 'Jugada mínima', icon: '♟️', hint: 'Modo mínimo viable' },
+    { id: 'frentes', label: 'Frentes activos', icon: '📡', hint: 'Cuánto tienes abierto' },
+    { id: 'jugada', label: 'Jugada del día', icon: '🀄', hint: 'Una sola cosa que importó' },
+    { id: 'nubes', label: 'Mirar las nubes', icon: '🌥️', hint: 'Parar a propósito' },
   ],
+  nerea: [{ id: 'principal', label: 'Protocolo y registro', icon: '💙', hint: 'Todo en un sitio' }],
 };
 
 const TOOL_RENDERERS = {
   habitos: { hoy: renderHabitosHoy, lista: renderHabitosLista, resumen: renderHabitosResumen, calendario: renderHabitosCal, stats: renderHabitosStats, archivo: renderHabitosArchivo },
   ugoh: { ideas: renderUgohIdeas, videos: renderUgohVideos, hooks: renderUgohHooks, stats: renderUgohStats, seo: renderUgohSeo, metas: renderUgohMetas, camino: renderUgohCamino },
   fitness: { log: renderFitLog, carga: renderFitOverload, rutinas: renderFitRoutines, peso: renderFitWeight, timer: renderFitTimer, recuperacion: renderFitRecovery, metas: renderFitGoals, comidas: renderFitMeals },
-  extra: { countdown: renderCountdowns, viaje: renderTravelMode, pomodoro: renderPomodoro, contactos: renderContacts },
+  extra: { mentalidad: renderShikaMentalidad, minimo: renderShikaMinimo, frentes: renderShikaFrentes, jugada: renderShikaJugada, nubes: renderShikaNubes },
+  nerea: { principal: renderNereaMain },
 };
 
 let currentSection = null;
@@ -292,7 +315,8 @@ let currentTool = null;
 
 function openSection(id) {
   currentSection = id;
-  currentTool = null;
+  const tools = SECTION_TOOLS[id];
+  currentTool = tools.length === 1 ? tools[0].id : null;
   renderSectionShell(true);
 }
 function closeSection() {
@@ -308,6 +332,7 @@ function closeSection() {
 function renderSectionShell(isFirstOpen) {
   const meta = SECTIONS.find((s) => s.id === currentSection);
   const tools = SECTION_TOOLS[currentSection];
+  const singleTool = tools.length === 1;
   const atMenu = !currentTool;
   const root = document.getElementById('sectionRoot');
   const title = atMenu ? meta.label : tools.find((t) => t.id === currentTool).label;
@@ -328,7 +353,7 @@ function renderSectionShell(isFirstOpen) {
     document.getElementById('sectionBody').scrollTop = 0;
   }
   document.getElementById('backBtn').onclick = () => {
-    if (currentTool) {
+    if (currentTool && !singleTool) {
       currentTool = null;
       renderSectionShell(false);
     } else {
@@ -457,6 +482,8 @@ function habitStreak(h) {
   let streak = 0;
   for (let i = 0; i < 400; i++) {
     const d = daysAgo(i);
+    const minimalSelection = DB.minimalDays[d];
+    if (minimalSelection && !minimalSelection.includes(h.id)) continue; // en pausa por modo mínimo ese día, no cuenta ni rompe
     const log = DB.habitLogs[d];
     const done = log && log[h.id] && (h.type === 'bool' ? log[h.id] === true : log[h.id] >= (h.target || 1));
     if (done) streak++;
@@ -498,7 +525,7 @@ function taskForm(existing) {
 }
 
 function renderHabitosHoy(el) {
-  const list = activeHabits();
+  const allActive = activeHabits();
   const today = todayStr();
   const log = DB.habitLogs[today] || {};
   const quote = quoteOfDay();
@@ -506,6 +533,9 @@ function renderHabitosHoy(el) {
   const currentMood = DB.moods[today];
   const todayTasks = DB.tasks.filter((t) => t.date === today);
   const nowHM = `${String(new Date().getHours()).padStart(2, '0')}:${String(new Date().getMinutes()).padStart(2, '0')}`;
+  const minimalSelection = DB.minimalDays[today];
+  const list = minimalSelection ? allActive.filter((h) => minimalSelection.includes(h.id)) : allActive;
+  const pausedCount = minimalSelection ? allActive.length - list.length : 0;
 
   function isDone(h) {
     const val = log[h.id];
@@ -617,6 +647,14 @@ function renderHabitosHoy(el) {
     <div class="card" style="text-align:center;border-color:var(--accent);">
       <div class="card-sub" style="font-style:italic;">"${esc(quote)}"</div>
     </div>
+    ${
+      minimalSelection
+        ? `<div class="card row between" style="border-color:var(--accent);background:rgba(255,90,31,0.08);">
+      <div><div class="card-title">♟️ Modo mínimo activo</div><div class="card-sub">${pausedCount} hábito${pausedCount === 1 ? '' : 's'} en pausa hoy, sin romper racha.</div></div>
+      <button class="btn" id="deactivateMinimal">Desactivar</button>
+    </div>`
+        : ''
+    }
     <div class="card">
       <div class="card-sub mb" style="text-align:center;">¿Cómo llegas hoy?</div>
       <div class="row" style="justify-content:center;gap:10px;">
@@ -656,6 +694,14 @@ function renderHabitosHoy(el) {
     ${LEVELS.map(levelSection).join('')}
   `;
   document.getElementById('addTask').addEventListener('click', () => taskForm());
+  if (document.getElementById('deactivateMinimal')) {
+    document.getElementById('deactivateMinimal').addEventListener('click', () => {
+      delete DB.minimalDays[today];
+      persist('minimalDays');
+      toast('Modo mínimo desactivado');
+      renderHabitosHoy(el);
+    });
+  }
   el.querySelectorAll('[data-mood]').forEach((b) =>
     b.addEventListener('click', () => {
       DB.moods[today] = b.dataset.mood;
@@ -942,10 +988,25 @@ function renderHabitosResumen(el) {
     else narrative = `Esta semana ha costado sostener los hábitos núcleo (${coreAvg}% de media). No es un fracaso, es información: quizás toca ajustar algo, no rendirte.`;
   }
 
+  const weekEpisodes = DB.nereaEpisodes.filter((e) => e.date >= daysAgo(daysElapsed - 1));
+  const prevWeekEpisodes = DB.nereaEpisodes.filter((e) => e.date >= daysAgo(daysElapsed - 1 + 7) && e.date < daysAgo(daysElapsed - 1));
+  let nereaLine = '';
+  if (weekEpisodes.length || prevWeekEpisodes.length) {
+    const avgThis = weekEpisodes.length ? weekEpisodes.reduce((s, e) => s + Number(e.intensity), 0) / weekEpisodes.length : 0;
+    const avgPrev = prevWeekEpisodes.length ? prevWeekEpisodes.reduce((s, e) => s + Number(e.intensity), 0) / prevWeekEpisodes.length : 0;
+    let trend = 'estable';
+    if (weekEpisodes.length && prevWeekEpisodes.length) {
+      if (avgThis < avgPrev - 0.3) trend = 'bajando';
+      else if (avgThis > avgPrev + 0.3) trend = 'subiendo';
+    }
+    nereaLine = `Con Nerea: ${weekEpisodes.length} episodio${weekEpisodes.length === 1 ? '' : 's'} esta semana, intensidad ${trend}.`;
+  }
+
   el.innerHTML = `
     <div class="card" style="text-align:center;border-color:var(--accent);">
       <div class="card-sub">Semana en curso · día ${daysElapsed} de 7</div>
       <div class="card-title mt" style="font-size:16px;">${esc(narrative || 'Aún no hay datos suficientes esta semana.')}</div>
+      ${nereaLine ? `<div class="card-sub mt">${esc(nereaLine)}</div>` : ''}
     </div>
 
     ${
@@ -2038,6 +2099,380 @@ function renderContacts(el) {
           renderContacts(el);
         })
     );
+  });
+}
+
+/* ============================================================
+   NEREA — protocolo de confianza en acción
+   ============================================================ */
+
+const nereaExpanded = new Set();
+
+function nereaStreak() {
+  let streak = 0;
+  for (let i = 0; i < 400; i++) {
+    const iso = daysAgo(i);
+    const dayEpisodes = DB.nereaEpisodes.filter((e) => e.date === iso);
+    const hadFailure = dayEpisodes.some((e) => e.protocol === 'no');
+    if (hadFailure) {
+      if (i === 0) continue; // no cortar la racha por el día de hoy si aún puede mejorar
+      break;
+    }
+    streak++;
+  }
+  return streak;
+}
+
+function renderNereaMain(el) {
+  const episodes = DB.nereaEpisodes.slice().sort((a, b) => (a.date + a.time < b.date + b.time ? 1 : -1));
+  const total = episodes.length;
+  const solved = episodes.filter((e) => e.protocol === 'si' || e.protocol === 'medias').length;
+  const pctSolved = total ? Math.round((solved / total) * 100) : null;
+  const streak = nereaStreak();
+
+  function avgIntensity(days) {
+    const cutoff = daysAgo(days - 1);
+    const inRange = episodes.filter((e) => e.date >= cutoff);
+    if (!inRange.length) return null;
+    return (inRange.reduce((s, e) => s + Number(e.intensity), 0) / inRange.length).toFixed(1);
+  }
+  const avg7 = avgIntensity(7);
+  const avg30 = avgIntensity(30);
+
+  const days30 = [];
+  for (let i = 29; i >= 0; i--) {
+    const iso = daysAgo(i);
+    const dayEpisodes = episodes.filter((e) => e.date === iso);
+    const maxIntensity = dayEpisodes.length ? Math.max(...dayEpisodes.map((e) => Number(e.intensity))) : 0;
+    days30.push(maxIntensity);
+  }
+
+  const protocolIcon = { si: '✅', medias: '🟡', no: '🔴' };
+  const protocolLabel = { si: 'Sí, lo apliqué', medias: 'A medias', no: 'No lo logré' };
+
+  el.innerHTML = `
+    <div class="card" style="border-color:var(--accent);">
+      <div class="card-title" style="font-size:16px;">Protocolo</div>
+      <div class="card-sub mt">Dispara con: sale con amigas, tarda en responder, habla con otro chico, plan suyo sin ti.</div>
+
+      <div class="section-label" style="margin-top:14px;">En el momento (0-10 seg)</div>
+      <div class="card-sub">· Responder normal y corto, sin preguntas de control<br>· Soltar el móvil de la mano</div>
+
+      <div class="section-label">Cuando vuelve el pensamiento</div>
+      <div class="card-sub">· Detecta "estoy rumiando"<br>· Pregúntate: ¿hecho nuevo o imaginación?<br>· Si no hay hecho nuevo: ocupa las manos (gym, UGOH), nada de scroll pasivo</div>
+
+      <div class="card mt" style="background:var(--surface-2);border-color:var(--accent);">
+        <div class="card-sub" style="font-style:italic;">"Confiar no es sentir cero duda, es actuar como si confiara aunque la duda aparezca. El ok del mensaje y el ok de la cabeza tienen que ser el mismo."</div>
+      </div>
+    </div>
+
+    <div class="section-label">Estadísticas</div>
+    <div class="card">
+      <div class="row between">
+        <span class="card-title">🔥 ${streak} días seguidos sosteniendo el protocolo</span>
+      </div>
+    </div>
+    <div class="grid-2">
+      <div class="card" style="text-align:center;">
+        <div class="card-sub">Soltado (sí + a medias)</div>
+        <div class="display" style="font-size:28px;">${pctSolved === null ? '—' : pctSolved + '%'}</div>
+      </div>
+      <div class="card" style="text-align:center;">
+        <div class="card-sub">Episodios totales</div>
+        <div class="display" style="font-size:28px;">${total}</div>
+      </div>
+      <div class="card" style="text-align:center;">
+        <div class="card-sub">Intensidad media 7 días</div>
+        <div class="display" style="font-size:28px;">${avg7 ?? '—'}</div>
+      </div>
+      <div class="card" style="text-align:center;">
+        <div class="card-sub">Intensidad media 30 días</div>
+        <div class="display" style="font-size:28px;">${avg30 ?? '—'}</div>
+      </div>
+    </div>
+    <div class="card">
+      <div class="card-sub mb">Intensidad, últimos 30 días</div>
+      <div class="row" style="flex-wrap:wrap;gap:4px;">
+        ${days30
+          .map(
+            (v) =>
+              `<div style="width:16px;height:16px;border-radius:4px;background:${v === 0 ? 'var(--surface-2)' : `rgba(255,90,31,${0.25 + (v / 5) * 0.75})`};"></div>`
+          )
+          .join('')}
+      </div>
+    </div>
+
+    <div class="row between">
+      <span class="section-label" style="margin-top:14px;">Registro de episodios</span>
+      <button class="btn btn-accent" id="addEpisode" style="margin-top:10px;">+ Nuevo episodio</button>
+    </div>
+    ${
+      episodes
+        .map((e) => {
+          const expanded = nereaExpanded.has(e.id);
+          return `
+      <div class="card">
+        <button class="row between" data-expand="${e.id}" style="width:100%;">
+          <div class="row" style="gap:10px;">
+            <span>${protocolIcon[e.protocol]}</span>
+            <div style="text-align:left;">
+              <div class="card-title">${esc(e.trigger)}</div>
+              <div class="card-sub">${fmtDate(e.date)} · ${esc(e.time)} · intensidad ${e.intensity}/5</div>
+            </div>
+          </div>
+          <span class="chevron ${expanded ? 'open' : ''}">▾</span>
+        </button>
+        <div class="${expanded ? '' : 'collapsed'} mt">
+          <div class="card-sub">${protocolLabel[e.protocol]}</div>
+          ${e.note ? `<div class="card-sub mt" style="font-style:italic;">"${esc(e.note)}"</div>` : ''}
+          <button class="btn-ghost mt" data-delep="${e.id}" style="color:var(--warn);">Borrar episodio</button>
+        </div>
+      </div>`;
+        })
+        .join('') || emptyState('Sin episodios registrados', 'Cuando aparezca uno, regístralo aquí para ver el patrón con el tiempo.')
+    }
+  `;
+
+  document.getElementById('addEpisode').addEventListener('click', () => nereaEpisodeForm());
+  el.querySelectorAll('[data-expand]').forEach((b) =>
+    b.addEventListener('click', () => {
+      const id = b.dataset.expand;
+      if (nereaExpanded.has(id)) nereaExpanded.delete(id);
+      else nereaExpanded.add(id);
+      renderNereaMain(el);
+    })
+  );
+  el.querySelectorAll('[data-delep]').forEach((b) =>
+    b.addEventListener('click', (ev) => {
+      ev.stopPropagation();
+      if (!confirm('¿Borrar este episodio?')) return;
+      DB.nereaEpisodes = DB.nereaEpisodes.filter((x) => x.id !== b.dataset.delep);
+      persist('nereaEpisodes');
+      renderNereaMain(el);
+    })
+  );
+}
+
+function nereaEpisodeForm() {
+  const now = new Date();
+  openSheet(
+    'Nuevo episodio',
+    `
+    <div class="field"><label class="field-label">Disparador</label><input id="epTrigger" placeholder="Salió de fiesta, tardó en responder..." /></div>
+    <div class="field">
+      <label class="field-label">Intensidad de la ansiedad (1-5)</label>
+      <input id="epIntensity" type="range" min="1" max="5" value="3" style="width:100%;" />
+      <div class="row between"><span class="card-sub">1 · leve</span><span class="card-sub" id="epIntensityVal">3</span><span class="card-sub">5 · fuerte</span></div>
+    </div>
+    <div class="field"><label class="field-label">¿Logré aplicar el protocolo?</label>
+      <select id="epProtocol">
+        <option value="si">✅ Sí</option>
+        <option value="medias">🟡 A medias</option>
+        <option value="no">🔴 No</option>
+      </select>
+    </div>
+    <div class="field"><label class="field-label">Nota (opcional)</label><textarea id="epNote" placeholder="Qué pasó, qué pensé..."></textarea></div>
+    <button class="btn btn-accent" id="epSave" style="width:100%;padding:12px;">Guardar</button>
+  `,
+    (body) => {
+      body.querySelector('#epIntensity').addEventListener('input', (e) => {
+        body.querySelector('#epIntensityVal').textContent = e.target.value;
+      });
+      body.querySelector('#epSave').addEventListener('click', () => {
+        const trigger = body.querySelector('#epTrigger').value.trim();
+        if (!trigger) return toast('Escribe el disparador');
+        DB.nereaEpisodes.push({
+          id: uid(),
+          date: todayStr(),
+          time: `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`,
+          trigger,
+          intensity: Number(body.querySelector('#epIntensity').value),
+          protocol: body.querySelector('#epProtocol').value,
+          note: body.querySelector('#epNote').value.trim(),
+        });
+        persist('nereaEpisodes');
+        closeSheet();
+        toast('Episodio registrado');
+        renderNereaMain(document.getElementById('sectionBody'));
+      });
+    }
+  );
+}
+
+/* ============================================================
+   SHIKAMARU — esfuerzo mínimo, movimiento justo
+   ============================================================ */
+
+function renderShikaMentalidad(el) {
+  const quote = shikamaruQuoteOfDay();
+  el.innerHTML = `
+    <div class="card" style="text-align:center;border-color:var(--accent);">
+      <div class="card-title" style="font-size:18px;">"${esc(quote)}"</div>
+    </div>
+    <div class="section-label">La mentalidad</div>
+    <div class="card">
+      <div class="card-sub">Shikamaru no es vago de verdad — odia gastar energía en cosas que no valen la pena. Cuando algo le importa, lo hace sin dudar. El resto del tiempo, piensa antes de moverse, como en el shogi: mover todas las piezas a la vez es la forma más rápida de perder.</div>
+    </div>
+    <div class="section-label">Aplicado a ti</div>
+    <div class="card">
+      <div class="card-sub">No tienes pereza real. Tienes demasiados frentes abiertos a la vez, y eso agota aunque cada cosa sea pequeña. No hace falta sostener todo perfecto cada día — elige 1-2 movimientos que de verdad importan y deja que el resto avance más despacio, sin culpa.</div>
+    </div>
+    <div class="card" style="background:var(--surface-2);border-color:var(--accent);">
+      <div class="card-sub" style="font-style:italic;">Un buen estratega no juega todas las piezas. Juega la que mueve la partida.</div>
+    </div>
+  `;
+}
+
+function renderShikaMinimo(el) {
+  const today = todayStr();
+  const active = today && DB.minimalDays[today];
+  const habits = activeHabits();
+  if (active) {
+    const selectedHabits = habits.filter((h) => active.includes(h.id));
+    el.innerHTML = `
+      <div class="card" style="border-color:var(--accent);">
+        <div class="card-title">♟️ Modo mínimo activo hoy</div>
+        <div class="card-sub mt">Solo cuenta esto, el resto está en pausa sin penalizar racha:</div>
+      </div>
+      ${selectedHabits.map((h) => `<div class="card"><div class="card-title">${h.level === 'nucleo' ? '⭐' : '🔹'} ${esc(h.name)}</div></div>`).join('')}
+      <button class="btn btn-accent mt" id="deactivateMin2" style="width:100%;padding:12px;">Desactivar modo mínimo</button>
+    `;
+    document.getElementById('deactivateMin2').addEventListener('click', () => {
+      delete DB.minimalDays[today];
+      persist('minimalDays');
+      toast('Modo mínimo desactivado');
+      renderShikaMinimo(el);
+    });
+    return;
+  }
+  el.innerHTML = `
+    <div class="card-sub mb">Días de agobio, no de perfección. Elige hasta 3 cosas que de verdad vas a sostener hoy — el resto queda en pausa sin romper ninguna racha.</div>
+    <div id="minList">
+      ${habits
+        .map(
+          (h) => `<div class="card row between" data-min="${h.id}" style="cursor:pointer;">
+        <div class="row" style="gap:10px;"><span>${h.level === 'nucleo' ? '⭐' : '🔹'}</span><span class="card-title">${esc(h.name)}</span></div>
+        <button class="checkbox" data-mincheck="${h.id}"></button>
+      </div>`
+        )
+        .join('') || emptyState('Sin hábitos', 'Crea alguno primero en Hábitos.')}
+    </div>
+    <button class="btn btn-accent mt" id="activateMin" style="width:100%;padding:12px;">Activar modo mínimo</button>
+  `;
+  const selected = new Set();
+  function toggleSelect(id) {
+    if (selected.has(id)) selected.delete(id);
+    else {
+      if (selected.size >= 3) return toast('Máximo 3 — esa es la idea');
+      selected.add(id);
+    }
+    el.querySelector(`[data-mincheck="${id}"]`).classList.toggle('checked', selected.has(id));
+    el.querySelector(`[data-mincheck="${id}"]`).textContent = selected.has(id) ? '✓' : '';
+  }
+  el.querySelectorAll('[data-min]').forEach((card) =>
+    card.addEventListener('click', () => toggleSelect(card.dataset.min))
+  );
+  document.getElementById('activateMin').addEventListener('click', () => {
+    if (!selected.size) return toast('Elige al menos una cosa');
+    DB.minimalDays[today] = Array.from(selected);
+    persist('minimalDays');
+    toast('Modo mínimo activado para hoy');
+    renderShikaMinimo(el);
+  });
+}
+
+function renderShikaFrentes(el) {
+  const habits = activeHabits();
+  const core = habits.filter((h) => h.level === 'nucleo').length;
+  const mini = habits.filter((h) => h.level !== 'nucleo').length;
+  const pendingTasks = DB.tasks.filter((t) => t.date === todayStr() && !t.done).length;
+  const activeVideos = DB.ugohVideos.filter((v) => (v.checklist || []).some((c) => !c.done)).length;
+  const total = core + mini + pendingTasks + activeVideos;
+
+  let message = '';
+  if (total <= 5) message = 'Pocos frentes abiertos. Margen para meter algo nuevo si quieres.';
+  else if (total <= 10) message = 'Nivel manejable. Vigila que no crezca mucho más esta semana.';
+  else message = 'Tienes muchos frentes a la vez. No es momento de añadir más — es momento de cerrar alguno o pausarlo con el Modo mínimo.';
+
+  el.innerHTML = `
+    <div class="card" style="text-align:center;border-color:var(--accent);">
+      <div class="display" style="font-size:44px;">${total}</div>
+      <div class="card-sub">frentes abiertos ahora mismo</div>
+    </div>
+    <div class="grid-2">
+      <div class="card" style="text-align:center;"><div class="card-title">${core}</div><div class="card-sub">⭐ Núcleo</div></div>
+      <div class="card" style="text-align:center;"><div class="card-title">${mini}</div><div class="card-sub">🔹 Mini hábitos</div></div>
+      <div class="card" style="text-align:center;"><div class="card-title">${pendingTasks}</div><div class="card-sub">Tareas de hoy</div></div>
+      <div class="card" style="text-align:center;"><div class="card-title">${activeVideos}</div><div class="card-sub">Vídeos en marcha</div></div>
+    </div>
+    <div class="card mt">
+      <div class="card-sub">${esc(message)}</div>
+    </div>
+  `;
+}
+
+function renderShikaJugada(el) {
+  const today = todayStr();
+  const history = Object.entries(DB.dailyMove)
+    .sort((a, b) => (a[0] < b[0] ? 1 : -1))
+    .slice(0, 14);
+  el.innerHTML = `
+    <div class="card-sub mb">Cada día, una sola jugada — la cosa que de verdad movió la aguja, no la lista entera de lo que hiciste.</div>
+    <div class="field"><textarea id="moveText" placeholder="¿Cuál fue tu jugada de hoy?">${esc(DB.dailyMove[today] || '')}</textarea></div>
+    <button class="btn btn-accent mb" id="moveSave" style="width:100%;padding:12px;">Guardar jugada de hoy</button>
+    <div class="section-label">Historial</div>
+    ${
+      history
+        .filter(([d]) => d !== today)
+        .map(([d, text]) => `<div class="card"><div class="card-sub">${fmtDate(d)}</div><div class="card-title mt">${esc(text)}</div></div>`)
+        .join('') || `<div class="card-sub">Aún no hay jugadas anteriores.</div>`
+    }
+  `;
+  document.getElementById('moveSave').addEventListener('click', () => {
+    const text = document.getElementById('moveText').value.trim();
+    if (!text) return toast('Escribe algo, aunque sea corto');
+    DB.dailyMove[today] = text;
+    persist('dailyMove');
+    toast('Jugada guardada');
+    renderShikaJugada(el);
+  });
+}
+
+let nubesInterval = null;
+function renderShikaNubes(el) {
+  el.innerHTML = `
+    <div class="card-sub mb" style="text-align:center;">Parar a propósito no es procrastinar. Es pensar con calma antes de moverte.</div>
+    <div class="row" style="justify-content:center;gap:8px;">
+      <button class="btn" data-nubes="5">5 min</button>
+      <button class="btn" data-nubes="10">10 min</button>
+      <button class="btn" data-nubes="15">15 min</button>
+    </div>
+    <div class="timer-display" id="nubesDisplay">--:--</div>
+    <div class="row" style="justify-content:center;"><button class="btn" id="nubesStop">Detener</button></div>
+  `;
+  el.querySelectorAll('[data-nubes]').forEach((b) =>
+    b.addEventListener('click', () => {
+      let secs = Number(b.dataset.nubes) * 60;
+      clearInterval(nubesInterval);
+      const disp = document.getElementById('nubesDisplay');
+      const tick = () => {
+        const m = String(Math.floor(secs / 60)).padStart(2, '0');
+        const s = String(secs % 60).padStart(2, '0');
+        disp.textContent = `${m}:${s}`;
+        if (secs <= 0) {
+          clearInterval(nubesInterval);
+          toast('Vuelve con la cabeza más clara.');
+          if (navigator.vibrate) navigator.vibrate(200);
+        }
+        secs--;
+      };
+      tick();
+      nubesInterval = setInterval(tick, 1000);
+    })
+  );
+  document.getElementById('nubesStop').addEventListener('click', () => {
+    clearInterval(nubesInterval);
+    document.getElementById('nubesDisplay').textContent = '--:--';
   });
 }
 
