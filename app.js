@@ -91,6 +91,8 @@ const DB = {
   brainrotLog: load('brainrotLog', []), // {id, date, time, resisted: bool}
   dayPlan: load('dayPlan', {}), // {date: [habitIds selected for that day]}
   breathingLog: load('breathingLog', []), // {id, date, time, technique, before, after, note}
+  sleepLog: load('sleepLog', {}), // {date: {hours, quality(1-5), note}}
+  windDown: load('windDown', {}), // {date: [indices completed]}
 };
 
 function persist(key) {
@@ -181,6 +183,7 @@ const SECTIONS = [
   { id: 'habitos', label: 'HÁBITOS', sub: 'El camino, día a día' },
   { id: 'ugoh', label: 'UGOH', sub: 'El camino real · contenido' },
   { id: 'fitness', label: 'FITNESS', sub: 'Cuerpo y disciplina' },
+  { id: 'sueno', label: 'SUEÑO', sub: 'Descanso y recuperación' },
   { id: 'nerea', label: 'NEREA', sub: 'Confianza en acción' },
   { id: 'extra', label: 'SHIKAMARU', sub: 'Esfuerzo mínimo, movimiento justo' },
 ];
@@ -313,17 +316,25 @@ const SECTION_TOOLS = {
     { id: 'frentes', label: 'Frentes activos', icon: '📡', hint: 'Cuánto tienes abierto' },
     { id: 'jugada', label: 'Jugada del día', icon: '🀄', hint: 'Una sola cosa que importó' },
     { id: 'nubes', label: 'Mirar las nubes', icon: '🌥️', hint: 'Parar a propósito' },
-    { id: 'respirar', label: 'Respirar', icon: '🫁', hint: 'Técnicas guiadas y registro' },
   ],
   nerea: [{ id: 'principal', label: 'Protocolo y registro', icon: '💙', hint: 'Todo en un sitio' }],
+  sueno: [
+    { id: 'registro', label: 'Registro', icon: '🌙', hint: 'Horas y calidad de anoche' },
+    { id: 'winddown', label: 'Antes de dormir', icon: '🕯️', hint: 'Rutina wind-down' },
+    { id: 'puntuacion', label: 'Recuperación', icon: '🔋', hint: 'Valoración y qué hacer mañana' },
+    { id: 'correlacion', label: 'Sueño y entrenos', icon: '🔗', hint: 'Cómo se relacionan' },
+    { id: 'higiene', label: 'Higiene del sueño', icon: '📖', hint: 'Info y buenas prácticas' },
+    { id: 'respirar', label: 'Respirar', icon: '🫁', hint: 'Técnicas guiadas y registro' },
+  ],
 };
 
 const TOOL_RENDERERS = {
   habitos: { hoy: renderHabitosHoy, lista: renderHabitosLista, plan: renderHabitosPlan, antibrainrot: renderAntibrainrot, resumen: renderHabitosResumen, calendario: renderHabitosCal, stats: renderHabitosStats, archivo: renderHabitosArchivo },
   ugoh: { ideas: renderUgohIdeas, videos: renderUgohVideos, hooks: renderUgohHooks, stats: renderUgohStats, seo: renderUgohSeo, metas: renderUgohMetas, camino: renderUgohCamino },
   fitness: { log: renderFitLog, carga: renderFitOverload, rutinas: renderFitRoutines, peso: renderFitWeight, timer: renderFitTimer, recuperacion: renderFitRecovery, metas: renderFitGoals, comidas: renderFitMeals },
-  extra: { mentalidad: renderShikaMentalidad, minimo: renderShikaMinimo, frentes: renderShikaFrentes, jugada: renderShikaJugada, nubes: renderShikaNubes, respirar: renderShikaRespirar },
+  extra: { mentalidad: renderShikaMentalidad, minimo: renderShikaMinimo, frentes: renderShikaFrentes, jugada: renderShikaJugada, nubes: renderShikaNubes },
   nerea: { principal: renderNereaMain },
+  sueno: { registro: renderSuenoRegistro, winddown: renderSuenoWinddown, puntuacion: renderSuenoPuntuacion, correlacion: renderSuenoCorrelacion, higiene: renderSuenoHigiene, respirar: renderShikaRespirar },
 };
 
 let currentSection = null;
@@ -2813,6 +2824,207 @@ function breathingSession(technique) {
       });
     }
   });
+}
+
+/* ============================================================
+   SUEÑO — descanso y recuperación
+   ============================================================ */
+
+function moodValue(emoji) {
+  return { '😴': 1, '😤': 2, '😐': 3, '🙂': 4, '🔥': 5 }[emoji] ?? null;
+}
+function moodPoints(emoji) {
+  return { '🔥': 25, '🙂': 20, '😐': 12, '😴': 8, '😤': 5 }[emoji] ?? 15;
+}
+
+function renderSuenoRegistro(el) {
+  const today = todayStr();
+  const entry = DB.sleepLog[today] || {};
+  const history = Object.entries(DB.sleepLog)
+    .sort((a, b) => (a[0] < b[0] ? 1 : -1))
+    .slice(0, 14);
+  el.innerHTML = `
+    <div class="card-sub mb">Regístralo por la mañana, sobre la noche que acabas de dormir.</div>
+    <div class="field"><label class="field-label">Horas dormidas</label><input id="sleepHours" type="number" step="0.5" placeholder="7.5" value="${entry.hours ?? ''}" /></div>
+    <div class="field">
+      <label class="field-label">Calidad (1-5)</label>
+      <input id="sleepQuality" type="range" min="1" max="5" value="${entry.quality ?? 3}" style="width:100%;" />
+      <div class="row between"><span class="card-sub">1 mala</span><span class="card-sub" id="sleepQualVal">${entry.quality ?? 3}</span><span class="card-sub">5 excelente</span></div>
+    </div>
+    <div class="field"><label class="field-label">Nota (opcional)</label><textarea id="sleepNote" placeholder="Te despertaste, tuviste calor, dormiste del tirón...">${esc(entry.note || '')}</textarea></div>
+    <button class="btn btn-accent mb" id="sleepSave" style="width:100%;padding:12px;">Guardar</button>
+    <div class="section-label">Últimas noches</div>
+    ${
+      history
+        .map(([d, e]) => `<div class="card row between"><span class="card-title">${fmtDate(d)}</span><span class="card-sub">${e.hours}h · calidad ${e.quality}/5</span></div>`)
+        .join('') || emptyState('Sin registros todavía', '')
+    }
+  `;
+  document.getElementById('sleepQuality').addEventListener('input', (e) => (document.getElementById('sleepQualVal').textContent = e.target.value));
+  document.getElementById('sleepSave').addEventListener('click', () => {
+    const hours = Number(document.getElementById('sleepHours').value);
+    if (!hours) return toast('Pon las horas dormidas');
+    DB.sleepLog[today] = {
+      hours,
+      quality: Number(document.getElementById('sleepQuality').value),
+      note: document.getElementById('sleepNote').value.trim(),
+    };
+    persist('sleepLog');
+    toast('Sueño registrado');
+    renderSuenoRegistro(el);
+  });
+}
+
+const WINDDOWN_ITEMS = [
+  'Sin pantallas 30 min antes',
+  'Luz baja en casa',
+  'Nada de cafeína después de las 16h',
+  'Habitación fresca y oscura',
+  'Estiramiento o respiración suave',
+  'Mañana ya planificada (Plan diario)',
+];
+
+function renderSuenoWinddown(el) {
+  const today = todayStr();
+  const done = DB.windDown[today] || [];
+  el.innerHTML = `
+    <div class="card-sub mb">Marca lo que vayas haciendo esta noche antes de dormir.</div>
+    ${WINDDOWN_ITEMS.map(
+      (item, i) => `
+      <div class="card row between" data-wd="${i}" style="cursor:pointer;">
+        <span class="card-title">${esc(item)}</span>
+        <button class="checkbox ${done.includes(i) ? 'checked' : ''}" data-wdcheck="${i}">${done.includes(i) ? '✓' : ''}</button>
+      </div>`
+    ).join('')}
+    <div class="card-sub mt" style="text-align:center;">${done.length}/${WINDDOWN_ITEMS.length} completado esta noche</div>
+  `;
+  el.querySelectorAll('[data-wd]').forEach((card) =>
+    card.addEventListener('click', () => {
+      const i = Number(card.dataset.wd);
+      const set = new Set(DB.windDown[today] || []);
+      if (set.has(i)) set.delete(i);
+      else set.add(i);
+      DB.windDown[today] = Array.from(set);
+      persist('windDown');
+      renderSuenoWinddown(el);
+    })
+  );
+}
+
+function renderSuenoPuntuacion(el) {
+  const today = todayStr();
+  const yesterday = daysAgo(1);
+  const sleep = DB.sleepLog[today] || DB.sleepLog[yesterday];
+  const mood = DB.moods[today];
+  const trainedYesterday = DB.workouts.some((w) => w.date === yesterday);
+  const lastDeloadWeeks = (() => {
+    if (!DB.deloads.length) return 99;
+    const last = [...DB.deloads].sort().pop();
+    return Math.floor((Date.now() - new Date(last).getTime()) / 86400000 / 7);
+  })();
+  const trainedDayBefore = DB.workouts.some((w) => w.date === daysAgo(2));
+
+  const sleepHoursPts = sleep ? Math.max(0, Math.min(40, (sleep.hours / 8) * 40)) : 20;
+  const sleepQualityPts = sleep ? (sleep.quality / 5) * 25 : 12;
+  const moodPts = mood ? moodPoints(mood) : 15;
+  let loadPts;
+  if (!trainedYesterday) loadPts = 15;
+  else if (trainedYesterday && trainedDayBefore && lastDeloadWeeks > 3) loadPts = 5;
+  else if (lastDeloadWeeks <= 2) loadPts = 12;
+  else loadPts = 10;
+
+  const score = Math.round(Math.min(100, sleepHoursPts + sleepQualityPts + moodPts + loadPts));
+
+  let band, recommendation;
+  if (score >= 80) {
+    band = 'Alta';
+    recommendation = 'Buen momento para exigirte. Entrena con normalidad o sube intensidad si tocaba.';
+  } else if (score >= 60) {
+    band = 'Aceptable';
+    recommendation = 'Entrena normal, pero sin forzar un máximo hoy.';
+  } else if (score >= 40) {
+    band = 'Floja';
+    recommendation = 'Reduce volumen o intensidad. Prioriza técnica sobre carga.';
+  } else {
+    band = 'Baja';
+    recommendation = 'Tu cuerpo está pidiendo descanso. Valora un día suave o de deload.';
+  }
+
+  el.innerHTML = `
+    <div class="card" style="text-align:center;border-color:var(--accent);">
+      <div class="display" style="font-size:52px;">${score}%</div>
+      <div class="card-title">Recuperación: ${band}</div>
+      <div class="card-sub mt">${esc(recommendation)}</div>
+    </div>
+    <div class="card-sub mt" style="text-align:center;">Estimación propia a partir de lo que registras (sueño, ánimo, carga de entreno reciente) — no es una medición biométrica ni un diagnóstico médico, solo una guía para decidir mañana.</div>
+    <div class="section-label">Cómo se calcula</div>
+    <div class="card"><div class="row between"><span class="card-sub">Horas de sueño</span><span class="card-sub">${Math.round(sleepHoursPts)}/40</span></div><div class="progress-bar"><div class="progress-fill" style="width:${(sleepHoursPts / 40) * 100}%"></div></div></div>
+    <div class="card"><div class="row between"><span class="card-sub">Calidad del sueño</span><span class="card-sub">${Math.round(sleepQualityPts)}/25</span></div><div class="progress-bar"><div class="progress-fill" style="width:${(sleepQualityPts / 25) * 100}%"></div></div></div>
+    <div class="card"><div class="row between"><span class="card-sub">Ánimo de hoy</span><span class="card-sub">${Math.round(moodPts)}/25</span></div><div class="progress-bar"><div class="progress-fill" style="width:${(moodPts / 25) * 100}%"></div></div></div>
+    <div class="card"><div class="row between"><span class="card-sub">Carga de entreno reciente</span><span class="card-sub">${Math.round(loadPts)}/15</span></div><div class="progress-bar"><div class="progress-fill" style="width:${(loadPts / 15) * 100}%"></div></div></div>
+    ${!sleep ? `<div class="card-sub mt">Aún no registraste tu sueño de hoy — la puntuación mejora en precisión si lo haces cada mañana.</div>` : ''}
+  `;
+}
+
+function renderSuenoCorrelacion(el) {
+  const nights = Object.entries(DB.sleepLog);
+  if (nights.length < 3) {
+    el.innerHTML = emptyState('Datos insuficientes todavía', 'Registra tu sueño unos días más para ver patrones.');
+    return;
+  }
+  let trainedHoursSum = 0, trainedCount = 0, restHoursSum = 0, restCount = 0;
+  nights.forEach(([date, e]) => {
+    const prevDay = daysAgo(Math.round((Date.now() - new Date(date + 'T00:00:00').getTime()) / 86400000) + 1);
+    const trained = DB.workouts.some((w) => w.date === prevDay);
+    if (trained) { trainedHoursSum += e.hours; trainedCount++; }
+    else { restHoursSum += e.hours; restCount++; }
+  });
+  const avgTrained = trainedCount ? (trainedHoursSum / trainedCount).toFixed(1) : null;
+  const avgRest = restCount ? (restHoursSum / restCount).toFixed(1) : null;
+
+  const buckets = { baja: [], media: [], alta: [] };
+  nights.forEach(([date, e]) => {
+    const m = DB.moods[date];
+    if (!m) return;
+    const mv = moodValue(m);
+    if (mv === null) return;
+    if (e.hours < 6) buckets.baja.push(mv);
+    else if (e.hours <= 7.5) buckets.media.push(mv);
+    else buckets.alta.push(mv);
+  });
+  const avgMood = (arr) => (arr.length ? (arr.reduce((s, v) => s + v, 0) / arr.length).toFixed(1) : null);
+
+  el.innerHTML = `
+    <div class="section-label">Sueño después de entrenar</div>
+    <div class="grid-2">
+      <div class="card" style="text-align:center;"><div class="card-sub">Días que entrenaste el día antes</div><div class="display" style="font-size:26px;">${avgTrained ?? '—'}h</div></div>
+      <div class="card" style="text-align:center;"><div class="card-sub">Días de descanso</div><div class="display" style="font-size:26px;">${avgRest ?? '—'}h</div></div>
+    </div>
+    <div class="section-label">Ánimo según horas dormidas</div>
+    <div class="card"><div class="row between"><span class="card-sub">Menos de 6h</span><span class="card-title">${avgMood(buckets.baja) ?? '—'}/5</span></div></div>
+    <div class="card"><div class="row between"><span class="card-sub">Entre 6 y 7.5h</span><span class="card-title">${avgMood(buckets.media) ?? '—'}/5</span></div></div>
+    <div class="card"><div class="row between"><span class="card-sub">Más de 7.5h</span><span class="card-title">${avgMood(buckets.alta) ?? '—'}/5</span></div></div>
+    <div class="card-sub mt">Con pocos días esto es solo orientativo — cuantas más noches registres, más fiable será el patrón.</div>
+  `;
+}
+
+function renderSuenoHigiene(el) {
+  el.innerHTML = `
+    <div class="card">
+      <div class="card-title" style="font-size:16px;">Buenas prácticas generales</div>
+      <div class="card-sub mt">
+        · Horarios consistentes: acostarte y levantarte a horas parecidas, incluso el fin de semana<br><br>
+        · Luz natural nada más despertar — ayuda a regular el ritmo circadiano<br><br>
+        · Evita pantallas y cafeína varias horas antes de dormir<br><br>
+        · Habitación fresca, oscura y silenciosa<br><br>
+        · Reserva la cama para dormir, no para trabajar o hacer scroll<br><br>
+        · Si no te duermes en 20 minutos, levántate y haz algo tranquilo hasta que te entre sueño
+      </div>
+    </div>
+    <div class="card mt">
+      <div class="card-sub" style="font-style:italic;">Esto es información general, no un consejo médico. Si el sueño te cuesta de forma persistente o notas que afecta mucho a tu día a día, coméntalo con un profesional — sobre todo teniendo en cuenta tu anemia.</div>
+    </div>
+  `;
 }
 
 /* ---------------- Init ---------------- */
