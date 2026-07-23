@@ -78,6 +78,18 @@ const DB = {
   nereaEpisodes: load('nereaEpisodes', []), // {id, date, time, trigger, intensity(1-5), protocol:'si'|'medias'|'no', note}
   minimalDays: load('minimalDays', {}), // {date: [selectedIds]}
   dailyMove: load('dailyMove', {}), // {date: text}
+  brainrotBank: load('brainrotBank', [
+    'Estira 2 minutos',
+    'Bebe un vaso de agua',
+    'Escribe una idea para UGOH, aunque sea mala',
+    'Manda un mensaje a tu pareja',
+    'Haz 20 flexiones o sentadillas',
+    'Sal a caminar 5 minutos',
+    'Ordena una cosa de tu escritorio',
+    'Apunta algo en tu diario',
+  ]),
+  brainrotLog: load('brainrotLog', []), // {id, date, time, resisted: bool}
+  dayPlan: load('dayPlan', {}), // {date: [habitIds selected for that day]}
 };
 
 function persist(key) {
@@ -268,6 +280,8 @@ const SECTION_TOOLS = {
   habitos: [
     { id: 'hoy', label: 'Hoy', icon: '✓', hint: 'Marca tus hábitos de hoy' },
     { id: 'lista', label: 'Hábitos', icon: '📋', hint: 'Crea, edita y organiza' },
+    { id: 'plan', label: 'Plan diario', icon: '🗒️', hint: 'Elige qué toca cada día' },
+    { id: 'antibrainrot', label: 'Antibrainrot', icon: '📵', hint: 'Cuando quieras scrollear' },
     { id: 'resumen', label: 'Resumen semanal', icon: '📊', hint: 'Cómo va tu semana' },
     { id: 'calendario', label: 'Calendario', icon: '🗓️', hint: 'Vista mensual completa' },
     { id: 'stats', label: 'Estadísticas', icon: '📈', hint: 'Consistencia y ánimo' },
@@ -303,7 +317,7 @@ const SECTION_TOOLS = {
 };
 
 const TOOL_RENDERERS = {
-  habitos: { hoy: renderHabitosHoy, lista: renderHabitosLista, resumen: renderHabitosResumen, calendario: renderHabitosCal, stats: renderHabitosStats, archivo: renderHabitosArchivo },
+  habitos: { hoy: renderHabitosHoy, lista: renderHabitosLista, plan: renderHabitosPlan, antibrainrot: renderAntibrainrot, resumen: renderHabitosResumen, calendario: renderHabitosCal, stats: renderHabitosStats, archivo: renderHabitosArchivo },
   ugoh: { ideas: renderUgohIdeas, videos: renderUgohVideos, hooks: renderUgohHooks, stats: renderUgohStats, seo: renderUgohSeo, metas: renderUgohMetas, camino: renderUgohCamino },
   fitness: { log: renderFitLog, carga: renderFitOverload, rutinas: renderFitRoutines, peso: renderFitWeight, timer: renderFitTimer, recuperacion: renderFitRecovery, metas: renderFitGoals, comidas: renderFitMeals },
   extra: { mentalidad: renderShikaMentalidad, minimo: renderShikaMinimo, frentes: renderShikaFrentes, jugada: renderShikaJugada, nubes: renderShikaNubes },
@@ -482,6 +496,8 @@ function habitStreak(h) {
   let streak = 0;
   for (let i = 0; i < 400; i++) {
     const d = daysAgo(i);
+    const plan = DB.dayPlan[d];
+    if (plan && !plan.includes(h.id)) continue; // no estaba en el plan de ese día, no cuenta ni rompe
     const minimalSelection = DB.minimalDays[d];
     if (minimalSelection && !minimalSelection.includes(h.id)) continue; // en pausa por modo mínimo ese día, no cuenta ni rompe
     const log = DB.habitLogs[d];
@@ -534,8 +550,11 @@ function renderHabitosHoy(el) {
   const todayTasks = DB.tasks.filter((t) => t.date === today);
   const nowHM = `${String(new Date().getHours()).padStart(2, '0')}:${String(new Date().getMinutes()).padStart(2, '0')}`;
   const minimalSelection = DB.minimalDays[today];
-  const list = minimalSelection ? allActive.filter((h) => minimalSelection.includes(h.id)) : allActive;
-  const pausedCount = minimalSelection ? allActive.length - list.length : 0;
+  const todayPlan = DB.dayPlan[today];
+  const afterPlan = todayPlan ? allActive.filter((h) => todayPlan.includes(h.id)) : allActive;
+  const list = minimalSelection ? afterPlan.filter((h) => minimalSelection.includes(h.id)) : afterPlan;
+  const pausedCount = minimalSelection ? afterPlan.length - list.length : 0;
+  const notPlannedCount = todayPlan ? allActive.length - afterPlan.length : 0;
 
   function isDone(h) {
     const val = log[h.id];
@@ -653,6 +672,11 @@ function renderHabitosHoy(el) {
       <div><div class="card-title">♟️ Modo mínimo activo</div><div class="card-sub">${pausedCount} hábito${pausedCount === 1 ? '' : 's'} en pausa hoy, sin romper racha.</div></div>
       <button class="btn" id="deactivateMinimal">Desactivar</button>
     </div>`
+        : ''
+    }
+    ${
+      todayPlan && notPlannedCount > 0
+        ? `<div class="card"><div class="card-sub">🗒️ Plan de hoy: ${notPlannedCount} hábito${notPlannedCount === 1 ? '' : 's'} no toca${notPlannedCount === 1 ? '' : 'n'} hoy según lo que planificaste.</div></div>`
         : ''
     }
     <div class="card">
@@ -2473,6 +2497,102 @@ function renderShikaNubes(el) {
   document.getElementById('nubesStop').addEventListener('click', () => {
     clearInterval(nubesInterval);
     document.getElementById('nubesDisplay').textContent = '--:--';
+  });
+}
+
+function dayPlanForm(date, onSaved) {
+  const habits = activeHabits();
+  const existing = DB.dayPlan[date];
+  const isTomorrow = date === daysAgo(-1);
+  openSheet(
+    `Plan para ${isTomorrow ? 'mañana' : fmtDate(date)}`,
+    `
+    <div class="card-sub mb">Marca los hábitos que tocan ese día. Si no planificas nada, se asume que tocan todos por defecto.</div>
+    <div id="planList">
+      ${habits
+        .map((h) => {
+          const checked = existing ? existing.includes(h.id) : true;
+          return `<div class="card row between" data-plancard="${h.id}" style="cursor:pointer;">
+          <div class="row" style="gap:10px;"><span>${h.level === 'nucleo' ? '⭐' : '🔹'}</span><span class="card-title">${esc(h.name)}</span></div>
+          <button class="checkbox ${checked ? 'checked' : ''}" data-plancheck="${h.id}">${checked ? '✓' : ''}</button>
+        </div>`;
+        })
+        .join('') || emptyState('Sin hábitos', 'Crea alguno primero en Hábitos.')}
+    </div>
+    <button class="btn btn-accent mt" id="planSave" style="width:100%;padding:12px;">Guardar plan</button>
+    ${existing ? `<button class="btn-ghost mt" id="planReset" style="width:100%;">Quitar plan (volver a todos por defecto)</button>` : ''}
+  `,
+    (body) => {
+      const selected = new Set(existing ? existing : habits.map((h) => h.id));
+      function toggle(id) {
+        if (selected.has(id)) selected.delete(id);
+        else selected.add(id);
+        const btn = body.querySelector(`[data-plancheck="${id}"]`);
+        btn.classList.toggle('checked', selected.has(id));
+        btn.textContent = selected.has(id) ? '✓' : '';
+      }
+      body.querySelectorAll('[data-plancard]').forEach((card) => card.addEventListener('click', () => toggle(card.dataset.plancard)));
+      body.querySelector('#planSave').addEventListener('click', () => {
+        DB.dayPlan[date] = Array.from(selected);
+        persist('dayPlan');
+        closeSheet();
+        toast('Plan guardado');
+        if (onSaved) onSaved();
+      });
+      if (body.querySelector('#planReset')) {
+        body.querySelector('#planReset').addEventListener('click', () => {
+          delete DB.dayPlan[date];
+          persist('dayPlan');
+          closeSheet();
+          toast('Plan eliminado, vuelve a todos por defecto');
+          if (onSaved) onSaved();
+        });
+      }
+    }
+  );
+}
+
+function renderHabitosPlan(el) {
+  const tomorrow = daysAgo(-1);
+  const habits = activeHabits();
+  function dayRow(offset) {
+    const d = daysAgo(-offset);
+    const plan = DB.dayPlan[d];
+    const label = offset === 0 ? 'Hoy' : offset === 1 ? 'Mañana' : new Date(d + 'T00:00:00').toLocaleDateString('es-ES', { weekday: 'long', day: 'numeric', month: 'short' });
+    return `
+      <div class="card row between" data-editday="${d}" style="cursor:pointer;">
+        <div><div class="card-title" style="text-transform:capitalize;">${label}</div><div class="card-sub">${plan ? `${plan.length}/${habits.length} planificados` : 'Todos por defecto'}</div></div>
+        <span class="card-sub">Editar ›</span>
+      </div>`;
+  }
+  el.innerHTML = `
+    <div class="card-sub mb">Planifica la noche de antes qué toca mañana — así no tienes que decidirlo con la cabeza cansada.</div>
+    <button class="btn btn-accent mb" id="planTomorrow" style="width:100%;padding:12px;">🗒️ Planificar mañana</button>
+    <div class="section-label">Próximos días</div>
+    ${[0, 1, 2, 3, 4, 5, 6].map(dayRow).join('')}
+  `;
+  document.getElementById('planTomorrow').addEventListener('click', () => dayPlanForm(tomorrow, () => renderHabitosPlan(el)));
+  el.querySelectorAll('[data-editday]').forEach((card) =>
+    card.addEventListener('click', () => dayPlanForm(card.dataset.editday, () => renderHabitosPlan(el)))
+  );
+}
+
+function renderAntibrainrot(el) {
+  el.innerHTML = `
+    <div class="card" style="text-align:center;border-color:var(--accent);">
+      <div class="card-title" style="font-size:18px;">¿Sientes ganas de scrollear o perder el tiempo?</div>
+      <div class="card-sub mt">Antes de abrir esa app, prueba esto.</div>
+    </div>
+    <button class="btn btn-accent mb" id="brainrotGo" style="width:100%;padding:14px;">Dame una alternativa</button>
+    <div id="brainrotResult"></div>
+  `;
+  document.getElementById('brainrotGo').addEventListener('click', () => {
+    const pick = DB.brainrotBank[Math.floor(Math.random() * DB.brainrotBank.length)];
+    document.getElementById('brainrotResult').innerHTML = `
+      <div class="card" style="border-color:var(--accent);text-align:center;">
+        <div class="card-title" style="font-size:17px;">${esc(pick)}</div>
+      </div>
+    `;
   });
 }
 
