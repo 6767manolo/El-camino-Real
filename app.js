@@ -90,6 +90,7 @@ const DB = {
   ]),
   brainrotLog: load('brainrotLog', []), // {id, date, time, resisted: bool}
   dayPlan: load('dayPlan', {}), // {date: [habitIds selected for that day]}
+  breathingLog: load('breathingLog', []), // {id, date, time, technique, before, after, note}
 };
 
 function persist(key) {
@@ -312,6 +313,7 @@ const SECTION_TOOLS = {
     { id: 'frentes', label: 'Frentes activos', icon: '📡', hint: 'Cuánto tienes abierto' },
     { id: 'jugada', label: 'Jugada del día', icon: '🀄', hint: 'Una sola cosa que importó' },
     { id: 'nubes', label: 'Mirar las nubes', icon: '🌥️', hint: 'Parar a propósito' },
+    { id: 'respirar', label: 'Respirar', icon: '🫁', hint: 'Técnicas guiadas y registro' },
   ],
   nerea: [{ id: 'principal', label: 'Protocolo y registro', icon: '💙', hint: 'Todo en un sitio' }],
 };
@@ -320,7 +322,7 @@ const TOOL_RENDERERS = {
   habitos: { hoy: renderHabitosHoy, lista: renderHabitosLista, plan: renderHabitosPlan, antibrainrot: renderAntibrainrot, resumen: renderHabitosResumen, calendario: renderHabitosCal, stats: renderHabitosStats, archivo: renderHabitosArchivo },
   ugoh: { ideas: renderUgohIdeas, videos: renderUgohVideos, hooks: renderUgohHooks, stats: renderUgohStats, seo: renderUgohSeo, metas: renderUgohMetas, camino: renderUgohCamino },
   fitness: { log: renderFitLog, carga: renderFitOverload, rutinas: renderFitRoutines, peso: renderFitWeight, timer: renderFitTimer, recuperacion: renderFitRecovery, metas: renderFitGoals, comidas: renderFitMeals },
-  extra: { mentalidad: renderShikaMentalidad, minimo: renderShikaMinimo, frentes: renderShikaFrentes, jugada: renderShikaJugada, nubes: renderShikaNubes },
+  extra: { mentalidad: renderShikaMentalidad, minimo: renderShikaMinimo, frentes: renderShikaFrentes, jugada: renderShikaJugada, nubes: renderShikaNubes, respirar: renderShikaRespirar },
   nerea: { principal: renderNereaMain },
 };
 
@@ -2593,6 +2595,223 @@ function renderAntibrainrot(el) {
         <div class="card-title" style="font-size:17px;">${esc(pick)}</div>
       </div>
     `;
+  });
+}
+
+/* ---- Respirar ---- */
+
+const BREATHING_TECHNIQUES = [
+  {
+    id: 'box',
+    name: 'Respiración de caja',
+    pattern: [4, 4, 4, 4],
+    phases: ['Inhala', 'Sostén', 'Exhala', 'Sostén'],
+    benefit: 'Ritmo parejo en 4 tiempos. La usan equipos de operaciones especiales y atletas para bajar la activación rápido antes de algo exigente.',
+  },
+  {
+    id: '478',
+    name: 'Respiración 4-7-8',
+    pattern: [4, 7, 8],
+    phases: ['Inhala', 'Sostén', 'Exhala'],
+    benefit: 'Popularizada por el Dr. Andrew Weil. La exhalación larga fuerza una bajada notable del ritmo, útil antes de dormir o en picos de tensión.',
+  },
+  {
+    id: 'coherente',
+    name: 'Respiración coherente',
+    pattern: [5, 5],
+    phases: ['Inhala', 'Exhala'],
+    benefit: 'Unas 6 respiraciones por minuto, sin pausas. Se asocia a mejor variabilidad de la frecuencia cardiaca y un estado más estable durante el día.',
+  },
+  {
+    id: 'suspiro',
+    name: 'Suspiro fisiológico',
+    pattern: [2, 1, 6],
+    phases: ['Inhala', 'Inhala extra corta', 'Exhala larga'],
+    benefit: 'Doble inhalación por la nariz + exhalación larga por la boca. Estudiado en Stanford como una de las formas más rápidas de bajar la activación en el momento.',
+  },
+];
+
+const breathingExpanded = new Set();
+
+function renderShikaRespirar(el) {
+  const log = DB.breathingLog.slice().sort((a, b) => (a.date + a.time < b.date + b.time ? 1 : -1));
+  const recent = log.slice(0, 10);
+  const last30 = log.filter((e) => e.date >= daysAgo(29));
+  const avgDrop = last30.length ? (last30.reduce((s, e) => s + (e.before - e.after), 0) / last30.length).toFixed(1) : null;
+
+  el.innerHTML = `
+    <div class="card">
+      <div class="card-title" style="font-size:16px;">Por qué funciona</div>
+      <div class="card-sub mt">Respirar despacio y de forma controlada activa el sistema nervioso parasimpático — el que baja pulsaciones y activación cuando el cuerpo está en modo alerta constante. No sustituye ayuda profesional si el estrés es continuo o muy intenso, pero es una herramienta real para el momento.</div>
+    </div>
+
+    <div class="section-label">Técnicas</div>
+    ${BREATHING_TECHNIQUES.map((t) => {
+      const expanded = breathingExpanded.has(t.id);
+      return `
+      <div class="card">
+        <button class="row between" data-texp="${t.id}" style="width:100%;">
+          <span class="card-title">${esc(t.name)}</span>
+          <span class="chevron ${expanded ? 'open' : ''}">▾</span>
+        </button>
+        <div class="${expanded ? '' : 'collapsed'} mt">
+          <div class="card-sub">${esc(t.benefit)}</div>
+          <div class="card-sub mt">Patrón: ${t.pattern.map((s, i) => `${t.phases[i]} ${s}s`).join(' · ')}</div>
+        </div>
+        <button class="btn btn-accent mt" data-practice="${t.id}" style="width:100%;">Practicar</button>
+      </div>`;
+    }).join('')}
+
+    ${
+      avgDrop !== null
+        ? `<div class="section-label">Últimos 30 días</div><div class="card"><div class="card-sub">Bajada media de tensión por sesión</div><div class="display" style="font-size:28px;">${avgDrop}</div></div>`
+        : ''
+    }
+
+    <div class="section-label">Sesiones recientes</div>
+    ${
+      recent
+        .map(
+          (e) => `
+      <div class="card row between">
+        <div><div class="card-title">${esc(e.technique)}</div><div class="card-sub">${fmtDate(e.date)} · ${e.time}</div>${e.note ? `<div class="card-sub mt" style="font-style:italic;">"${esc(e.note)}"</div>` : ''}</div>
+        <span class="pill ${e.after < e.before ? 'good' : ''}">${e.before} → ${e.after}</span>
+      </div>`
+        )
+        .join('') || emptyState('Sin sesiones todavía', 'Practica una técnica para empezar tu registro.')
+    }
+  `;
+  el.querySelectorAll('[data-texp]').forEach((b) =>
+    b.addEventListener('click', () => {
+      const id = b.dataset.texp;
+      if (breathingExpanded.has(id)) breathingExpanded.delete(id);
+      else breathingExpanded.add(id);
+      renderShikaRespirar(el);
+    })
+  );
+  el.querySelectorAll('[data-practice]').forEach((b) =>
+    b.addEventListener('click', () => breathingSession(BREATHING_TECHNIQUES.find((t) => t.id === b.dataset.practice)))
+  );
+}
+
+function breathingSession(technique) {
+  openSheet(technique.name, `<div id="breathBody"></div>`, (sheetBody) => {
+    const body = sheetBody.querySelector('#breathBody');
+    renderBeforeStep();
+
+    function renderBeforeStep() {
+      body.innerHTML = `
+        <div class="card-sub mb">${esc(technique.benefit)}</div>
+        <div class="field">
+          <label class="field-label">Nivel de tensión ahora (1-5)</label>
+          <input type="range" min="1" max="5" value="3" id="beforeRange" style="width:100%;" />
+          <div class="row between"><span class="card-sub">1 relajado</span><span class="card-sub" id="beforeVal">3</span><span class="card-sub">5 muy tenso</span></div>
+        </div>
+        <div class="field">
+          <label class="field-label">Rondas</label>
+          <select id="roundsSelect"><option value="4">4 (rápido)</option><option value="6" selected>6</option><option value="8">8 (más largo)</option></select>
+        </div>
+        <button class="btn btn-accent" id="startBreath" style="width:100%;padding:12px;">Empezar</button>
+      `;
+      body.querySelector('#beforeRange').addEventListener('input', (e) => (body.querySelector('#beforeVal').textContent = e.target.value));
+      body.querySelector('#startBreath').addEventListener('click', () => {
+        runAnimation(Number(body.querySelector('#beforeRange').value), Number(body.querySelector('#roundsSelect').value));
+      });
+    }
+
+    function runAnimation(before, rounds) {
+      let round = 0;
+      let phaseIdx = 0;
+      let stopped = false;
+      body.innerHTML = `
+        <div style="display:flex;flex-direction:column;align-items:center;padding:16px 0;">
+          <div id="breathCircle" style="width:110px;height:110px;border-radius:50%;background:var(--accent);opacity:0.25;transform:scale(1);transition:transform 1s linear, opacity 1s linear;"></div>
+          <div id="breathLabel" class="card-title mt" style="font-size:19px;"></div>
+          <div id="breathCount" class="display mt" style="font-size:38px;"></div>
+          <div class="card-sub mt">Ronda <span id="roundNum">1</span>/${rounds}</div>
+          <button class="btn mt" id="stopBreath">Detener</button>
+        </div>
+      `;
+      const circle = body.querySelector('#breathCircle');
+      const label = body.querySelector('#breathLabel');
+      const countEl = body.querySelector('#breathCount');
+      const roundEl = body.querySelector('#roundNum');
+      body.querySelector('#stopBreath').addEventListener('click', () => {
+        stopped = true;
+        renderAfterStep(before);
+      });
+
+      function phaseStep() {
+        if (stopped) return;
+        if (round >= rounds) {
+          renderAfterStep(before);
+          return;
+        }
+        const phaseName = technique.phases[phaseIdx];
+        const duration = technique.pattern[phaseIdx];
+        label.textContent = phaseName;
+        roundEl.textContent = round + 1;
+        const lower = phaseName.toLowerCase();
+        circle.style.transitionDuration = duration + 's';
+        if (lower.includes('inhala')) {
+          circle.style.transform = 'scale(1.6)';
+          circle.style.opacity = '0.55';
+        } else if (lower.includes('exhala')) {
+          circle.style.transform = 'scale(1)';
+          circle.style.opacity = '0.25';
+        }
+        let remaining = duration;
+        countEl.textContent = remaining;
+        const tick = setInterval(() => {
+          if (stopped) return clearInterval(tick);
+          remaining--;
+          if (remaining <= 0) {
+            clearInterval(tick);
+            phaseIdx++;
+            if (phaseIdx >= technique.phases.length) {
+              phaseIdx = 0;
+              round++;
+            }
+            phaseStep();
+          } else {
+            countEl.textContent = remaining;
+          }
+        }, 1000);
+      }
+      phaseStep();
+    }
+
+    function renderAfterStep(before) {
+      body.innerHTML = `
+        <div class="card-sub mb" style="text-align:center;">Sesión completada.</div>
+        <div class="field">
+          <label class="field-label">Nivel de tensión ahora (1-5)</label>
+          <input type="range" min="1" max="5" value="${before}" id="afterRange" style="width:100%;" />
+          <div class="row between"><span class="card-sub">1 relajado</span><span class="card-sub" id="afterVal">${before}</span><span class="card-sub">5 muy tenso</span></div>
+        </div>
+        <div class="field"><label class="field-label">Nota (opcional)</label><textarea id="breathNote" placeholder="Qué notaste..."></textarea></div>
+        <button class="btn btn-accent" id="saveBreath" style="width:100%;padding:12px;">Guardar</button>
+      `;
+      body.querySelector('#afterRange').addEventListener('input', (e) => (body.querySelector('#afterVal').textContent = e.target.value));
+      body.querySelector('#saveBreath').addEventListener('click', () => {
+        const after = Number(body.querySelector('#afterRange').value);
+        const note = body.querySelector('#breathNote').value.trim();
+        const now = new Date();
+        DB.breathingLog.push({
+          id: uid(),
+          date: todayStr(),
+          time: `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`,
+          technique: technique.name,
+          before,
+          after,
+          note,
+        });
+        persist('breathingLog');
+        closeSheet();
+        toast(after < before ? 'Bajó la tensión. Buen trabajo.' : 'Sesión guardada.');
+        renderShikaRespirar(document.getElementById('sectionBody'));
+      });
+    }
   });
 }
 
