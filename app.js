@@ -180,53 +180,126 @@ function closeSheet() {
 /* ---------------- Router ---------------- */
 
 const SECTIONS = [
-  { id: 'habitos', label: 'HÁBITOS', sub: 'El camino, día a día' },
-  { id: 'ugoh', label: 'UGOH', sub: 'El camino real · contenido' },
-  { id: 'fitness', label: 'FITNESS', sub: 'Cuerpo y disciplina' },
-  { id: 'sueno', label: 'SUEÑO', sub: 'Descanso y recuperación' },
-  { id: 'nerea', label: 'NEREA', sub: 'Confianza en acción' },
-  { id: 'extra', label: 'SHIKAMARU', sub: 'Esfuerzo mínimo, movimiento justo' },
+  { id: 'habitos', label: 'HÁBITOS', sub: 'El camino, día a día', icon: '✓' },
+  { id: 'ugoh', label: 'UGOH', sub: 'El camino real · contenido', icon: '🎬' },
+  { id: 'fitness', label: 'FITNESS', sub: 'Cuerpo y disciplina', icon: '💪' },
+  { id: 'sueno', label: 'SUEÑO', sub: 'Descanso y recuperación', icon: '🌙' },
+  { id: 'nerea', label: 'NEREA', sub: 'Confianza en acción', icon: '💙' },
+  { id: 'extra', label: 'SHIKAMARU', sub: 'Esfuerzo mínimo, movimiento justo', icon: '♟️' },
 ];
 
 let activeSlide = 0;
+
+function flameGraphic(vitality) {
+  let outer, inner, glowOpacity, scale, animClass;
+  if (vitality >= 70) {
+    outer = ['#B33A15', '#FF5A1F', '#FFB020', '#FFF3C4'];
+    inner = ['#FF8A3D', '#FFD873', '#FFFBEF'];
+    glowOpacity = 0.6;
+    scale = 1.22;
+    animClass = 'flame-high';
+  } else if (vitality >= 40) {
+    outer = ['#8A3012', '#FF5A1F', '#FFB020', '#FFE8A3'];
+    inner = ['#FF8A3D', '#FFC94D', '#FFF6DD'];
+    glowOpacity = 0.42;
+    scale = 1;
+    animClass = 'flame-mid';
+  } else {
+    outer = ['#4A2C22', '#7A3A22', '#A85A30', '#C98A55'];
+    inner = ['#8A4A2E', '#B06A3E', '#D9B48A'];
+    glowOpacity = 0.22;
+    scale = 0.78;
+    animClass = 'flame-low';
+  }
+  const svg = `
+  <svg viewBox="0 0 100 130" width="84" height="109" style="display:block;">
+    <defs>
+      <radialGradient id="flameGlow" cx="50%" cy="70%" r="60%">
+        <stop offset="0%" stop-color="#FF5A1F" stop-opacity="${glowOpacity}"/>
+        <stop offset="100%" stop-color="#FF5A1F" stop-opacity="0"/>
+      </radialGradient>
+      <linearGradient id="flameOuter" x1="0%" y1="100%" x2="0%" y2="0%">
+        <stop offset="0%" stop-color="${outer[0]}"/>
+        <stop offset="40%" stop-color="${outer[1]}"/>
+        <stop offset="75%" stop-color="${outer[2]}"/>
+        <stop offset="100%" stop-color="${outer[3]}"/>
+      </linearGradient>
+      <linearGradient id="flameInner" x1="0%" y1="100%" x2="0%" y2="0%">
+        <stop offset="0%" stop-color="${inner[0]}"/>
+        <stop offset="55%" stop-color="${inner[1]}"/>
+        <stop offset="100%" stop-color="${inner[2]}"/>
+      </linearGradient>
+    </defs>
+    <ellipse cx="50" cy="108" rx="42" ry="16" fill="url(#flameGlow)"/>
+    <path d="M50 8 C 22 38, 14 66, 28 92 C 19 86, 15 73, 19 58 C 13 82, 27 108, 50 120 C 73 108, 87 82, 81 58 C 85 73, 81 86, 72 92 C 86 66, 78 38, 50 8 Z" fill="url(#flameOuter)"/>
+    <path d="M50 34 C 34 54, 30 75, 41 96 C 35 92, 32 82, 35 71 C 32 88, 41 105, 50 109 C 59 105, 68 88, 65 71 C 68 82, 65 92, 59 96 C 70 75, 66 54, 50 34 Z" fill="url(#flameInner)"/>
+  </svg>`;
+  return { svg, scale, animClass };
+}
 
 function render() {
   if (!DB.profile.onboarded) {
     renderOnboarding();
     return;
   }
+  const today = todayStr();
+  const activeH = activeHabits();
+  const log = DB.habitLogs[today] || {};
+  const doneToday = activeH.filter((h) => (h.type === 'bool' ? log[h.id] === true : (log[h.id] || 0) >= (h.target || 1))).length;
+  const habitPct = activeH.length ? Math.round((doneToday / activeH.length) * 100) : 0;
+  const coreStreak = overallCoreStreak();
+  const mood = DB.moods[today];
+  const moodLabel = { '😴': 'Cansado', '😐': 'Neutral', '🙂': 'Bien', '🔥': 'A tope', '😤': 'Tenso' }[mood] || 'Sin marcar';
+  const { score: recoveryScore } = computeRecoveryScore();
+  const vitality = Math.round((habitPct + recoveryScore) / 2);
+  const flame = flameGraphic(vitality);
+
   $app.innerHTML = `
-    <div class="top-greeting">
-      <button id="searchBtn" style="pointer-events:auto;font-size:15px;background:var(--surface);width:32px;height:32px;border-radius:50%;border:1px solid var(--line);">🔍</button>
-      <div class="name">${esc(DB.profile.name || 'Tú')}</div>
-      <div class="quote">${esc(quoteOfDay())}</div>
-    </div>
-    <div class="home" id="home">
-      ${SECTIONS.map(
-        (s, i) => `
-        <div class="slide" data-i="${i}">
-          <div class="slide-word display">${s.label}</div>
-          <div class="slide-sub">${s.sub}</div>
-          <div class="slide-tap">Toca para abrir</div>
-          <button class="slide-hit" data-open="${s.id}" aria-label="Abrir ${s.label}"></button>
-        </div>`
-      ).join('')}
-    </div>
-    <div class="path-wrap">
-      <span class="path-label">01</span>
-      <div class="path-track"><div class="path-fill" id="pathFill"></div></div>
-      <span class="path-label">04</span>
+    <div class="dash">
+      <div class="dash-top">
+        <button id="searchBtn" class="btn-icon" style="background:var(--surface);">🔍</button>
+        <div class="dash-name">${esc(DB.profile.name || 'Tú')}</div>
+        <div style="width:34px;"></div>
+      </div>
+
+      <div class="dash-hero">
+        <div class="dash-flame-wrap" style="transform:scale(${flame.scale});">
+          <div class="flame-anim ${flame.animClass}">${flame.svg}</div>
+        </div>
+        <div class="dash-hero-pct">${vitality}%</div>
+        <div class="dash-streak-label">tu camino hoy</div>
+        <div class="dash-hero-bar"><div class="dash-hero-fill" style="width:${vitality}%"></div></div>
+      </div>
+
+      <div class="dash-stats">
+        <div class="dash-stat">
+          <div class="dash-stat-value">${coreStreak}</div>
+          <div class="dash-stat-label">Racha núcleo</div>
+        </div>
+        <div class="dash-stat">
+          <div class="dash-stat-value">${recoveryScore}%</div>
+          <div class="dash-stat-label">Recuperación</div>
+        </div>
+        <div class="dash-stat">
+          <div class="dash-stat-value" style="font-size:24px;">${mood || '—'}</div>
+          <div class="dash-stat-label">${esc(moodLabel)}</div>
+        </div>
+      </div>
+
+      <div class="section-label" style="margin:18px 0 10px;padding:0 4px;">Tu camino</div>
+      <div class="tool-grid" style="padding:0 4px 30px;">
+        ${SECTIONS.map(
+          (s) => `
+          <button class="tool-btn" data-open="${s.id}">
+            <div class="tool-icon-badge">${s.icon}</div>
+            <div class="tool-label" style="font-size:18px;">${s.label}</div>
+            <div class="tool-hint">${esc(s.sub)}</div>
+          </button>`
+        ).join('')}
+      </div>
     </div>
     <div id="sectionRoot"></div>
   `;
-
-  const home = document.getElementById('home');
-  home.addEventListener('scroll', () => {
-    const i = Math.round(home.scrollLeft / home.clientWidth);
-    activeSlide = i;
-    updatePath();
-  });
-  updatePath();
 
   $app.querySelectorAll('[data-open]').forEach((btn) => {
     btn.addEventListener('click', () => openSection(btn.dataset.open));
@@ -297,8 +370,6 @@ const SECTION_TOOLS = {
     { id: 'hooks', label: 'Hooks', icon: '🪝', hint: 'Ganchos guardados' },
     { id: 'stats', label: 'Subs / Views', icon: '📈', hint: 'Evolución del canal' },
     { id: 'seo', label: 'SEO', icon: '🏷️', hint: 'Tags y keywords' },
-    { id: 'metas', label: 'Metas', icon: '🎯', hint: 'Objetivos del canal' },
-    { id: 'camino', label: 'El camino real', icon: '🧭', hint: 'Misión y tiempos' },
   ],
   fitness: [
     { id: 'log', label: 'Entrenos', icon: '📝', hint: 'Registra tu sesión' },
@@ -306,13 +377,9 @@ const SECTION_TOOLS = {
     { id: 'rutinas', label: 'Rutinas', icon: '🗂️', hint: 'Plantillas guardadas' },
     { id: 'peso', label: 'Peso', icon: '⚖️', hint: 'Evolución corporal' },
     { id: 'timer', label: 'Descanso', icon: '⏱️', hint: 'Cronómetro entre series' },
-    { id: 'recuperacion', label: 'Recuperación', icon: '🩹', hint: 'Fases y objetivo' },
-    { id: 'metas', label: 'Metas', icon: '🏆', hint: 'Marcas físicas' },
-    { id: 'comidas', label: 'Comidas', icon: '🍽️', hint: 'Ideas y antiazúcar' },
   ],
   extra: [
     { id: 'mentalidad', label: 'Mentalidad', icon: '☁️', hint: 'Léelo cada día' },
-    { id: 'minimo', label: 'Jugada mínima', icon: '♟️', hint: 'Modo mínimo viable' },
     { id: 'frentes', label: 'Frentes activos', icon: '📡', hint: 'Cuánto tienes abierto' },
     { id: 'jugada', label: 'Jugada del día', icon: '🀄', hint: 'Una sola cosa que importó' },
     { id: 'nubes', label: 'Mirar las nubes', icon: '🌥️', hint: 'Parar a propósito' },
@@ -330,9 +397,9 @@ const SECTION_TOOLS = {
 
 const TOOL_RENDERERS = {
   habitos: { hoy: renderHabitosHoy, lista: renderHabitosLista, plan: renderHabitosPlan, antibrainrot: renderAntibrainrot, resumen: renderHabitosResumen, calendario: renderHabitosCal, stats: renderHabitosStats, archivo: renderHabitosArchivo },
-  ugoh: { ideas: renderUgohIdeas, videos: renderUgohVideos, hooks: renderUgohHooks, stats: renderUgohStats, seo: renderUgohSeo, metas: renderUgohMetas, camino: renderUgohCamino },
-  fitness: { log: renderFitLog, carga: renderFitOverload, rutinas: renderFitRoutines, peso: renderFitWeight, timer: renderFitTimer, recuperacion: renderFitRecovery, metas: renderFitGoals, comidas: renderFitMeals },
-  extra: { mentalidad: renderShikaMentalidad, minimo: renderShikaMinimo, frentes: renderShikaFrentes, jugada: renderShikaJugada, nubes: renderShikaNubes },
+  ugoh: { ideas: renderUgohIdeas, videos: renderUgohVideos, hooks: renderUgohHooks, stats: renderUgohStats, seo: renderUgohSeo },
+  fitness: { log: renderFitLog, carga: renderFitOverload, rutinas: renderFitRoutines, peso: renderFitWeight, timer: renderFitTimer },
+  extra: { mentalidad: renderShikaMentalidad, frentes: renderShikaFrentes, jugada: renderShikaJugada, nubes: renderShikaNubes },
   nerea: { principal: renderNereaMain },
   sueno: { registro: renderSuenoRegistro, winddown: renderSuenoWinddown, puntuacion: renderSuenoPuntuacion, correlacion: renderSuenoCorrelacion, higiene: renderSuenoHigiene, respirar: renderShikaRespirar },
 };
@@ -400,7 +467,7 @@ function renderToolMenu(body, tools) {
     .map(
       (t) => `
     <button class="tool-btn" data-tool="${t.id}">
-      <div class="tool-icon">${t.icon}</div>
+      <div class="tool-icon-badge">${t.icon}</div>
       <div class="tool-label">${t.label}</div>
       <div class="tool-hint">${t.hint}</div>
     </button>`
@@ -504,6 +571,27 @@ function habitsAtLevel(levelId, list) {
   });
   if (changed) persist('habits');
 })();
+
+function overallCoreStreak() {
+  const core = activeHabits().filter((h) => h.level === 'nucleo');
+  if (!core.length) return 0;
+  let streak = 0;
+  for (let i = 0; i < 400; i++) {
+    const d = daysAgo(i);
+    const plan = DB.dayPlan[d];
+    const minimalSelection = DB.minimalDays[d];
+    const relevant = core.filter((h) => (!plan || plan.includes(h.id)) && (!minimalSelection || minimalSelection.includes(h.id)));
+    if (!relevant.length) { streak++; continue; } // día excusado del todo, no rompe
+    const log = DB.habitLogs[d] || {};
+    const allDone = relevant.every((h) => (h.type === 'bool' ? log[h.id] === true : (log[h.id] || 0) >= (h.target || 1)));
+    if (allDone) streak++;
+    else {
+      if (i === 0) continue;
+      break;
+    }
+  }
+  return streak;
+}
 
 function habitStreak(h) {
   let streak = 0;
@@ -2911,7 +2999,7 @@ function renderSuenoWinddown(el) {
   );
 }
 
-function renderSuenoPuntuacion(el) {
+function computeRecoveryScore() {
   const today = todayStr();
   const yesterday = daysAgo(1);
   const sleep = DB.sleepLog[today] || DB.sleepLog[yesterday];
@@ -2949,6 +3037,12 @@ function renderSuenoPuntuacion(el) {
     band = 'Baja';
     recommendation = 'Tu cuerpo está pidiendo descanso. Valora un día suave o de deload.';
   }
+
+  return { score, band, recommendation, sleep, sleepHoursPts, sleepQualityPts, moodPts, loadPts };
+}
+
+function renderSuenoPuntuacion(el) {
+  const { score, band, recommendation, sleep, sleepHoursPts, sleepQualityPts, moodPts, loadPts } = computeRecoveryScore();
 
   el.innerHTML = `
     <div class="card" style="text-align:center;border-color:var(--accent);">
