@@ -184,8 +184,8 @@ const SECTIONS = [
   { id: 'ugoh', label: 'UGOH', sub: 'El camino real · contenido', icon: '🎬' },
   { id: 'fitness', label: 'FITNESS', sub: 'Cuerpo y disciplina', icon: '💪' },
   { id: 'sueno', label: 'SUEÑO', sub: 'Descanso y recuperación', icon: '🌙' },
-  { id: 'nerea', label: 'NEREA', sub: 'Confianza en acción', icon: '💙' },
-  { id: 'extra', label: 'SHIKAMARU', sub: 'Esfuerzo mínimo, movimiento justo', icon: '♟️' },
+  { id: 'nerea', label: 'NEREA', sub: 'Confianza en acción', icon: '💗' },
+  { id: 'extra', label: 'SHIKAMARU', sub: 'Esfuerzo mínimo, movimiento justo', icon: '🍂' },
 ];
 
 let activeSlide = 0;
@@ -384,7 +384,7 @@ const SECTION_TOOLS = {
     { id: 'jugada', label: 'Jugada del día', icon: '🀄', hint: 'Una sola cosa que importó' },
     { id: 'nubes', label: 'Mirar las nubes', icon: '🌥️', hint: 'Parar a propósito' },
   ],
-  nerea: [{ id: 'principal', label: 'Protocolo y registro', icon: '💙', hint: 'Todo en un sitio' }],
+  nerea: [{ id: 'principal', label: 'Protocolo y registro', icon: '💗', hint: 'Todo en un sitio' }],
   sueno: [
     { id: 'registro', label: 'Registro', icon: '🌙', hint: 'Horas y calidad de anoche' },
     { id: 'winddown', label: 'Antes de dormir', icon: '🕯️', hint: 'Rutina wind-down' },
